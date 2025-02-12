@@ -1,0 +1,16 @@
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+            sudo snap install --beta --classic zig
+            pip install pytest
+            zig version
+      - name: Build example
+        run: pip install ./example
+      - name: Test example
+        run: pytest tests
