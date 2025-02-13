@@ -23,7 +23,7 @@ setup(
             sources=[
                 'src/pyzigtest.zig'
             ],
-            extra_compile_args=["-DOptimize=ReleaseSafe"]
+            extra_compile_args=["-ODebug"] # or -OReleaseFast, etc..
         )
     ],
     setup_requires=['setuptools-zig'],

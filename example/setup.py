@@ -11,7 +11,7 @@ setup(
             sources=[
                 'pyzigtest.zig'
             ],
-            extra_compile_args=["-DOptimize=Debug"]
+            extra_compile_args=["-ODebug"]
         )
     ],
     setup_requires=['setuptools-zig'],
