@@ -1,4 +1,4 @@
-# Lightweight Python ffi for zig
+# Lightweight Python bindings for zig
 
 py.zig provides a _lightweight_ interface for creating python extensions in zig. 
 
