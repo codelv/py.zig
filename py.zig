@@ -778,6 +778,10 @@ pub const Type = extern struct {
         }
         return error.PyError;
     }
+
+    pub fn free(self: *Type, obj: ?*Object) void {
+        self.impl.tp_free.?(obj);
+    }
 };
 
 pub const Metaclass = extern struct {
@@ -1705,30 +1709,31 @@ pub const ModuleDef = extern struct {
 // Zig allocator using python functions
 const Allocator = struct {
     const Self = @This();
+    const Alignment = u8;
     intepreter: ?*c.PyObject = null,
 
-    pub inline fn alloc(self: *Self, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+    pub fn alloc(self: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
         _ = self;
         _ = alignment;
         _ = ret_addr;
-        return c.PyMem_Malloc(len);
+        return @ptrCast(c.PyMem_Malloc(len));
     }
 
-    pub inline fn resize(self: *Self, mem: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+    pub fn resize(self: *anyopaque, mem: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
         _ = self;
         _ = alignment;
         _ = ret_addr;
         return c.PyMem_Realloc(mem.ptr, new_len) != null;
     }
 
-    pub inline fn remap(self: *Self, mem: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+    pub fn remap(self: *anyopaque, mem: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
         _ = self;
         _ = alignment;
         _ = ret_addr;
-        return c.PyMem_Realloc(mem.ptr, new_len);
+        return @ptrCast(c.PyMem_Realloc(mem.ptr, new_len));
     }
 
-    pub inline fn free(self: *Self, mem: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+    pub fn free(self: *anyopaque, mem: []u8, alignment: Alignment, ret_addr: usize) void {
         _ = self;
         _ = alignment;
         _ = ret_addr;
@@ -1742,7 +1747,7 @@ const Allocator = struct {
             .vtable = &.{
                 .alloc = alloc,
                 .resize = resize,
-                .remap = remap,
+                // .remap = remap,
                 .free = free,
             },
         };
