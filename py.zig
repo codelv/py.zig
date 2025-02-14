@@ -121,11 +121,11 @@ pub inline fn None() *Object {
 }
 
 pub inline fn True() *Object{
-    return @ptrCast(c._Py_TrueStruct);
+    return @ptrCast(&c._Py_TrueStruct);
 }
 
 pub inline fn False() *Object{
-    return @ptrCast(c._Py_FalseStruct);
+    return @ptrCast(&c._Py_FalseStruct);
 }
 
 // Replaces the macro Py_RETURN_NONE
@@ -133,23 +133,27 @@ pub inline fn returnNone() *Object {
     if (comptime versionCheck(.gte, VER_312)) {
         return None();
     }
-    return @ptrCast(c.Py_NewRef(&c._Py_NoneStruct));
+    return None().newref();
+}
+
+pub inline fn returnBool(value: bool) *Object {
+    return if (value) True() else False();
 }
 
 // Replaces the macro Py_RETURN_TRUE
 pub inline fn returnTrue() *Object {
     if (comptime versionCheck(.gte, VER_312)) {
-        return @ptrCast(&c._Py_TrueStruct);
+        return True();
     }
-    return @ptrCast(c.Py_NewRef(&c._Py_TrueStruct));
+    return True().newref();
 }
 
 // Replaces the macro Py_RETURN_FALSE
 pub inline fn returnFalse() *Object {
     if (comptime versionCheck(.gte, VER_312)) {
-        return @ptrCast(&c._Py_FalseStruct);
+        return False();
     }
-    return @ptrCast(c.Py_NewRef(&c._Py_FalseStruct));
+    return False().newref();
 }
 
 // Re-export the visitproc
