@@ -377,8 +377,17 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return @intCast(s);
         }
 
+        // Same as len(o) with error checking
+        pub inline fn objectSize(self: *T) !usize {
+            const r = self.objectSizeUnsafe();
+            if (r < 0) {
+                return error.PyError;
+            }
+            return @intCast(r);
+        }
+
         // Same as length but no error checking
-        pub inline fn objectSize(self: *T) isize {
+        pub inline fn objectSizeUnsafe(self: *T) isize {
             return c.PyObject_Size(@ptrCast(self));
         }
 
@@ -1194,7 +1203,9 @@ pub const Tuple = extern struct {
     // Get size with error checking
     pub inline fn size(self: *Tuple) !usize {
         const r = c.PyTuple_Size(@ptrCast(self));
-        if (r < 0) return error.PyError;
+        if (r < 0) {
+            return error.PyError;
+        }
         return @intCast(r);
     }
 
@@ -1260,6 +1271,8 @@ pub const Tuple = extern struct {
     }
 };
 
+// TODO: Create a ListProtocol()
+
 pub const List = extern struct {
     pub const BaseType = c.PyListObject;
 
@@ -1289,7 +1302,15 @@ pub const List = extern struct {
     }
 
     // Same as length but no error checking
-    pub inline fn size(self: *List) isize {
+    pub inline fn size(self: *List) !usize {
+        const r = self.sizeUnsafe();
+        if (r < 0) {
+            return error.PyError;
+        }
+        return @intCast(r);
+    }
+
+    pub inline fn sizeUnsafe(self: *List) isize {
         return c.PyList_Size(@ptrCast(self));
     }
 
@@ -1466,6 +1487,9 @@ pub const List = extern struct {
     }
 };
 
+
+// TODO: Create a DictProtocol()?
+
 pub const Dict = extern struct {
     pub const BaseType = c.PyDictObject;
     // Iteration item
@@ -1568,7 +1592,7 @@ pub const Dict = extern struct {
 
     // Calls PyDict_Merge(self, other, override) without error checking
     pub inline fn mergeUnchecked(self: *Dict, other: *Object, override: bool) c_int {
-        return @ptrCast(c.PyDict_Merge(@ptrCast(self), @ptrCast(other), @intFromBool(override)));
+        return c.PyDict_Merge(@ptrCast(self), @ptrCast(other), @intFromBool(override));
     }
 
     // This is the same as merge(a, b, 1) in C, and is similar to a.update(b) in Python
@@ -1594,7 +1618,9 @@ pub const Dict = extern struct {
     // This is equivalent to the Python expression key in p.
     pub inline fn contains(self: *Dict, key: *Object) !bool {
         const r = self.containsUnchecked(key);
-        if (r < 0) return error.PyError;
+        if (r < 0) {
+            return error.PyError;
+        }
         return r == 1;
     }
 
@@ -1606,7 +1632,9 @@ pub const Dict = extern struct {
     // Same as contains but key is a [:0]const u8 instead of *Object
     pub inline fn containsString(self: *Dict, key: [:0]const u8) !bool {
         const r = self.containsStringUnchecked(self, key);
-        if (r < 0) return error.PyError;
+        if (r < 0) {
+            return error.PyError;
+        }
         return r == 1;
     }
 
@@ -1616,8 +1644,18 @@ pub const Dict = extern struct {
         return c.PyDict_ContainsString(@ptrCast(self), key);
     }
 
+    // Get the size and check for errors.
+    pub inline fn size(self: *Dict) !usize {
+        const r = self.sizeUnsafe();
+        if (r < 0) {
+            return error.PyError;
+        }
+        return @intCast(r);
+    }
+
     // Same as length but no error checking
-    pub inline fn size(self: *Dict) isize {
+    // The docs do not mention it but PyDict_Size can return -1
+    pub inline fn sizeUnsafe(self: *Dict) isize {
         return c.PyDict_Size(@ptrCast(self));
     }
 
@@ -1673,6 +1711,7 @@ pub const Dict = extern struct {
     }
 };
 
+
 pub const Set = extern struct {
     pub const BaseType = c.PySetObject;
 
@@ -1682,9 +1721,147 @@ pub const Set = extern struct {
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 
+    // Return true if p is a set object or an instance of a subtype. This function always succeeds.
+    pub inline fn check(obj: *Object) bool {
+        return c.PySet_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    }
 
-    // TODO: finish
+    // Return true if p is a set object but not an instance of a subtype. This function always succeeds.
+    pub inline fn checkExact(obj: *Object) bool {
+        return c.PySet_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    }
+
+    // Return a new set containing objects returned by the iterable.
+    // The iterable may be NULL to create a new empty set.
+    // Raise TypeError if iterable is not actually iterable.
+    // The constructor is also useful for copying a set (c=set(s)).
+    // Returns new reference
+    pub inline fn new(iterable: ?*Object) !*Set {
+        if (newUnchecked(iterable)) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    // Same as new but does not check for errors
+    pub inline fn newUnchecked(iterable: ?*Object) ?*Set {
+        return @ptrCast(c.PySet_New(@ptrCast(iterable)));
+    }
+
+    // Return a new frozenset containing objects returned by the iterable.
+    // The iterable may be NULL to create a new empty frozenset.
+    // Return the new set on success raise an error on failure.
+    // Raise TypeError if iterable is not actually iterable.
+    // Returns new reference
+    pub inline fn newFrozen(iterable: ?*Object) !*Set {
+        if (newFrozenUnchecked(iterable)) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    // Same as newFrozen but does not check for errors
+    pub inline fn newFrozenUnchecked(iterable: ?*Object) ?*Set {
+        return @ptrCast(c.PyFrozenSet_New(@ptrCast(iterable)));
+    }
+
+    // Get the size and check for errors.
+    pub inline fn size(self: *Set) !usize {
+        const r = self.sizeUnsafe();
+        if (r < 0) {
+            return error.PyError;
+        }
+        return @intCast(r);
+    }
+
+    // Same as length but no error checking
+    // The docs do not mention it but PySet_Size can return -1 on error
+    pub inline fn sizeUnsafe(self: *Set) isize {
+        return c.PySet_Size(@ptrCast(self));
+    }
+
+    // Return true if found, or false if not found. or throw an error one  is encountered.
+    // Unlike the Python __contains__() method, this function does not automatically convert unhashable sets into temporary frozensets.
+    // Raise a TypeError if the key is unhashable.
+    // Raise SystemError if anyset is not a set, frozenset, or an instance of a subtype.
+    pub fn contains(self: *Set, key: *Object) !bool {
+        const r = self.containsUnchecked(key);
+        if (r < 0) {
+            return error.PyError;
+        }
+        return r == 1;
+    }
+
+
+    // Same as contains with no error checking
+    pub fn containsUnchecked(self: *Set, key: *Object) c_int {
+        return c.PySet_Contains(@ptrCast(self), @ptrCast(key));
+    }
+
+    // Add key to a set instance. Also works with frozenset instances (like PyTuple_SetItem() it can be used to fill in the values of brand new frozensets
+    // before they are exposed to other code).
+    // Raise a TypeError if the key is unhashable.
+    // Raise a MemoryError if there is no room to grow.
+    // Raise a SystemError if set is not an instance of set or its subtype.
+    pub fn add(self: *Set, key: *Object) !void {
+        if (self.addUnchecked(key) < 0) {
+            return error.PyError;
+        }
+    }
+
+    // Same as add with no error checking
+    pub fn addUnchecked(self: *Set, key: *Object) c_int {
+        return c.PySet_Add(@ptrCast(self), @ptrCast(key));
+    }
+
+    // Return true if found and removed, or false if not found (no action taken),
+    // Does not raise KeyError for missing keys.
+    // Raise a TypeError if the key is unhashable.
+    // Unlike the Python discard() method, this function does not automatically convert unhashable sets into temporary frozensets.
+    // Raise SystemError if set is not an instance of set or its subtype.
+    pub fn discard(self: *Set, key: *Object) !bool {
+        const r = self.discardUnchecked(key);
+        if (r < 0) {
+            return error.PyError;
+        }
+        return r == 1;
+    }
+
+    // Same as pop with no error checking
+    pub fn discardUnchecked(self: *Set, key: *Object) c_int {
+        return c.PySet_Discard(@ptrCast(self), @ptrCast(key));
+    }
+
+    // Return a new reference to an arbitrary object in the set, and removes the object from the set.
+    // Raise KeyError if the set is empty. Raise a SystemError if set is not an instance of set or its subtype.
+    // Returns new reference
+    pub fn pop(self: *Set) !*Object {
+        if (self.popUnchecked()) |r| {
+            return r;
+        }
+        return error.PyError;
+    }
+
+    // Same as pop with no error checking
+    pub fn popUnchecked(self: *Set) ?*Object {
+        return @ptrCast(c.PySet_Pop(@ptrCast(self)));
+    }
+
+    // Empty an existing set of all elements.
+    // raise SystemError if set is not an instance of set or its subtype.
+    pub fn clear(self: *Set) !void {
+        if (self.clearUnchecked() < 0) {
+            return error.PyError;
+        }
+    }
+
+    // Same as clear with no error checking
+    pub fn clearUnchecked(self: *Set) c_int {
+        return c.PySet_Clear(@ptrCast(self));
+    }
+
 };
+
 
 pub const Module = extern struct {
     // https://docs.python.org/3/c-api/module.html
@@ -1711,14 +1888,18 @@ pub const Module = extern struct {
     // This does not steal a reference to value.
     pub inline fn addObjectRef(self: *Module, name: [:0]const u8, value: *Object) !void {
         const r = c.PyModule_AddObjectRef(@ptrCast(self), name, @ptrCast(value));
-        if (r < 0) return error.PyError;
+        if (r < 0) {
+            return error.PyError;
+        }
     }
 
     // Like addObjectRef but steals a reference to value
     pub inline fn addObject(self: *Module, name: [:0]const u8, value: *Object) !void {
         const f = if (comptime versionCheck(.gte, VER_313)) c.PyModule_Add else c.PyModule_AddObject;
         const r = f(@ptrCast(self), name, @ptrCast(value));
-        if (r < 0) return error.PyError;
+        if (r < 0) {
+            return error.PyError;
+        }
     }
 
     pub inline fn create(def: *ModuleDef) ?*Module {
