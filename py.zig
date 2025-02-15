@@ -183,7 +183,10 @@ pub const visitproc = c.visitproc;
 pub inline fn visit(obj: anytype, func: visitproc, arg: ?*anyopaque) c_int {
     const T = @TypeOf(obj);
     if (comptime canCastToOptionalObject(T)) {
-        return if (obj) |p| func.?(@ptrCast(p), arg) else 0;
+        if (obj) |p| {
+            return func.?(@ptrCast(p), arg);
+        }
+        return 0;
     } else if (comptime canCastToObject(T)) {
         return func.?(@ptrCast(obj), arg);
     } else {
@@ -195,14 +198,22 @@ pub inline fn visit(obj: anytype, func: visitproc, arg: ?*anyopaque) c_int {
 pub inline fn visitAll(objects: anytype, func: visitproc, arg: ?*anyopaque) c_int {
     inline for (objects) |obj| {
         const T = @TypeOf(obj);
-        comptime if (!canCastToOptionalObject(T)) {
+        if (comptime canCastToOptionalObject(T)) {
+            if (obj) |p| {
+                const r = func.?(@ptrCast(p), arg);
+                if (r != 0) {
+                    return r;
+                }
+            }
+        } else if (comptime canCastToObject(T)) {
+            const r = func.?(@ptrCast(obj), arg);
+            if (r != 0) {
+                return r;
+            }
+        } else {
             @compileError(std.fmt.comptimePrint("py.visitAll arguments must be castable to ?*Object, got: {}", .{T}));
-        };
-
-        if (obj) |p| {
-            const r = func.?(@ptrCast(p), arg);
-            if (r != 0) return r;
         }
+
     }
     return 0;
 }
@@ -1209,7 +1220,7 @@ pub const Tuple = extern struct {
         return @intCast(r);
     }
 
-    pub inline fn sizeUnsafe(self: *Tuple) isize {
+    pub inline fn sizeUnchecked(self: *Tuple) isize {
         return c.PyTuple_GET_SIZE(@ptrCast(self));
     }
 
@@ -1303,14 +1314,14 @@ pub const List = extern struct {
 
     // Same as length but no error checking
     pub inline fn size(self: *List) !usize {
-        const r = self.sizeUnsafe();
+        const r = self.sizeUnchecked();
         if (r < 0) {
             return error.PyError;
         }
         return @intCast(r);
     }
 
-    pub inline fn sizeUnsafe(self: *List) isize {
+    pub inline fn sizeUnchecked(self: *List) isize {
         return c.PyList_Size(@ptrCast(self));
     }
 
@@ -1646,7 +1657,7 @@ pub const Dict = extern struct {
 
     // Get the size and check for errors.
     pub inline fn size(self: *Dict) !usize {
-        const r = self.sizeUnsafe();
+        const r = self.sizeUnchecked();
         if (r < 0) {
             return error.PyError;
         }
@@ -1655,7 +1666,7 @@ pub const Dict = extern struct {
 
     // Same as length but no error checking
     // The docs do not mention it but PyDict_Size can return -1
-    pub inline fn sizeUnsafe(self: *Dict) isize {
+    pub inline fn sizeUnchecked(self: *Dict) isize {
         return c.PyDict_Size(@ptrCast(self));
     }
 
@@ -1767,7 +1778,7 @@ pub const Set = extern struct {
 
     // Get the size and check for errors.
     pub inline fn size(self: *Set) !usize {
-        const r = self.sizeUnsafe();
+        const r = self.sizeUnchecked();
         if (r < 0) {
             return error.PyError;
         }
@@ -1776,7 +1787,7 @@ pub const Set = extern struct {
 
     // Same as length but no error checking
     // The docs do not mention it but PySet_Size can return -1 on error
-    pub inline fn sizeUnsafe(self: *Set) isize {
+    pub inline fn sizeUnchecked(self: *Set) isize {
         return c.PySet_Size(@ptrCast(self));
     }
 
