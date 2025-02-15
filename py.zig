@@ -104,13 +104,17 @@ pub inline fn memoryError() ?*Object {
     return @ptrCast(c.PyErr_NoMemory());
 }
 
-// Clear a reference *?*Object
+// Clear a reference to **Object or *?*Object
+// If pointer is to **Object it is set to undefined
 pub inline fn clear(obj: anytype) void {
     const T = @TypeOf(obj);
-    comptime if (!canCastToOptionalObjectPtr(T)) {
-        @compileError(std.fmt.comptimePrint("py.clear argument must be castable to *?*Object, got: {s}", .{@typeName(T)}));
-    };
-    xsetref(@ptrCast(obj), null);
+    if (comptime canCastToOptionalObjectPtr(T)) {
+        xsetref(@ptrCast(obj), null);
+    } else if (comptime canCastToObjectPtr(T)) {
+        setref(@ptrCast(obj), undefined);
+    } else {
+        @compileError(std.fmt.comptimePrint("py.clear argument must be castable to **Object or *?*Object, got: {s}", .{T}));
+    }
 }
 
 // Clear all
