@@ -70,30 +70,34 @@ pub inline fn errorString(msg: [:0]const u8) void {
 }
 
 pub inline fn errorFormat(exc: *Object, msg: [:0]const u8, args: anytype) ?*Object {
-    return @call(.auto, c.PyErr_Format, .{ @as([*c]c.PyObject, @ptrCast(exc)), msg.ptr } ++ args);
+    if (args.len == 0) {
+        c.PyErr_SetString(@ptrCast(exc), @ptrCast(msg));
+        return null;
+    }
+    return @ptrCast(@call(.auto, c.PyErr_Format, .{
+        @as([*c]c.PyObject, @ptrCast(exc)),
+        msg
+        } ++ args
+    ));
 }
 
 // Helper that is the equivalent to `TypeError(msg)`
-pub inline fn typeError(msg: [:0]const u8) ?*Object {
-    c.PyErr_SetString(c.PyExc_TypeError, @ptrCast(msg));
-    return null;
+pub inline fn typeError(msg: [:0]const u8, args: anytype) ?*Object {
+    return errorFormat(@ptrCast(c.PyExc_TypeError), msg, args);
 }
 
 // Helper that is the equivalent to `SystemError(msg)`
-pub inline fn systemError(msg: [:0]const u8) ?*Object {
-    c.PyErr_SetString(c.PyExc_SystemError, @ptrCast(msg));
-    return null;
+pub inline fn systemError(msg: [:0]const u8, args: anytype) ?*Object {
+    return errorFormat(@ptrCast(c.PyExc_SystemError), msg, args);
 }
 
 // Helper that is the equivalent to `ValueError(msg)`
-pub inline fn valueError(msg: [:0]const u8) ?*Object {
-    c.PyErr_SetString(c.PyExc_ValueError, @ptrCast(msg));
-    return null;
+pub inline fn valueError(msg: [:0]const u8, args: anytype) ?*Object {
+    return errorFormat(@ptrCast(c.PyExc_ValueError), msg, args);
 }
 
-pub inline fn attributeError(msg: [:0]const u8) ?*Object {
-    c.PyErr_SetString(c.PyExc_AttributeError, @ptrCast(msg));
-    return null;
+pub inline fn attributeError(msg: [:0]const u8, args: anytype) ?*Object {
+    return errorFormat(@ptrCast(c.PyExc_AttributeError), msg, args);
 }
 
 pub inline fn memoryError() ?*Object {
@@ -128,6 +132,10 @@ pub inline fn False() *Object{
     return @ptrCast(&c._Py_FalseStruct);
 }
 
+pub inline fn NotImplemented() *Object{
+    return @ptrCast(&c._Py_NotImplementedStruct);
+}
+
 // Replaces the macro Py_RETURN_NONE
 pub inline fn returnNone() *Object {
     if (comptime versionCheck(.gte, VER_312)) {
@@ -154,6 +162,14 @@ pub inline fn returnFalse() *Object {
         return False();
     }
     return False().newref();
+}
+
+// Replaces the macro Py_NOT_IMPLEMENTED
+pub inline fn returnNotImplemented() *Object {
+    if (comptime versionCheck(.gte, VER_312)) {
+        return NotImplemented();
+    }
+    return NotImplemented().newref();
 }
 
 // Re-export the visitproc
@@ -1114,6 +1130,29 @@ pub const Tuple = extern struct {
         if (r == 0) return error.PyError;
     }
 
+    pub inline fn parseTyped(self: *Tuple, args: anytype) !void {
+        const n = try self.size();
+        if (n != args.len) {
+            _ = typeError("Expected {} arguments got {}", .{args.len, n}); // TODO: Better message
+            return error.PyError;
+        }
+        inline for(args, 0..) |arg, i| {
+            const T = @TypeOf(arg);
+            if (comptime !canCastToObjectPtr(T)) {
+                @compileError(std.fmt.comptimePrint("parseTyped args must be *Object or subclasses: got {}",.{T}));
+            }
+            // Eg var arg: *Str: undefined
+            // then &arg is **Str
+            const ArgType = @typeInfo(@typeInfo(T).Pointer.child).Pointer.child;
+            const obj = try self.get(i);
+            if (!ArgType.check(obj)) {
+                _ = typeError("Argument at {} must be {}", .{i, @typeName(ArgType)});
+                return error.PyError;
+            }
+            arg.* = @ptrCast(obj);
+        }
+    }
+
     // Return true if p is a tuple object or an instance of a subtype of the tuple type.
     // This function always succeeds.
     pub inline fn check(obj: *Object) bool {
@@ -1171,7 +1210,8 @@ pub const Tuple = extern struct {
     }
 
     pub inline fn getUnsafe(self: *Tuple, pos: usize) ?*Object {
-        return c.PyTuple_GET_TIEM(@ptrCast(self), pos);
+        // TODO: fix PyTuple_GET_ITEM
+        return @ptrCast(c.PyTuple_GetItem(@ptrCast(self), pos));
     }
 
     // Insert a reference to object o at position pos of the tuple pointed to by p.
