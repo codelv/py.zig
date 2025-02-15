@@ -508,30 +508,49 @@ pub inline fn ObjectProtocol(comptime T: type) type {
 
         // Returns 1 if the object o is considered to be true, and 0 otherwise.
         // This is equivalent to the Python expression `not not o`.
-        pub inline fn isTrue(self: *T) !bool {
-            const r = self.isTrueUnchecked();
-            if (r < 0) return error.PyError;
+        pub inline fn evalsTrue(self: *T) !bool {
+            const r = self.evalsTrueUnchecked();
+            if (r < 0) {
+                return error.PyError;
+            }
             return r != 0;
         }
 
         // Calls PyObject_IsTrue on self. Same as isTrue but without error checking
         // On failure, return -1.
-        pub inline fn isTrueUnchecked(self: *T) c_int {
+        pub inline fn evalsTrueUnchecked(self: *T) c_int {
             return c.PyObject_IsTrue(@ptrCast(self));
         }
 
-        // Returns 1 if the object o is considered to be true, and 0 otherwise.
-        // This is equivalent to the Python expression not not o.
-        pub inline fn isNot(self: *T) !bool {
-            const r = self.isNotUnchecked();
-            if (r < 0) return error.PyError;
+        // Returns true if the object o is considered to be false.
+        // This is equivalent to the Python expression `not o`.
+        pub inline fn evalsFalse(self: *T) !bool {
+            const r = self.evalsFalseUnchecked();
+            if (r < 0) {
+                return error.PyError;
+            }
             return r != 0;
         }
 
         // Calls PyObject_Not on self. Same as isNot but without error checking
         // On failure, return -1.
-        pub inline fn isNotUnchecked(self: *T) c_int {
+        pub inline fn evalsFalseUnchecked(self: *T) c_int {
             return c.PyObject_Not(@ptrCast(self));
+        }
+
+        // Equivalent to the python expression `object is True`
+        pub inline fn isTrue(self: *T) bool {
+            return @as(*Object, @ptrCast(self)) == True();
+        }
+
+        // Equivalent to the python expression `object is False`
+        pub inline fn isFalse(self: *T) bool {
+            return @as(*Object, @ptrCast(self)) == False();
+        }
+
+        // Equivalent to the python expression `object is None`
+        pub inline fn isNone(self: *T) bool {
+            return @as(*Object, @ptrCast(self)) == None();
         }
 
         // Determine if the object o is callable. Return 1 if the object is callable and 0 otherwise. This function always succeeds.
