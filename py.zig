@@ -409,7 +409,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                     return @ptrCast(s);
                 }
                 // Set an error message
-                _ = typeError("str did not return a str");
+                _ = typeError("str did not return a str", .{});
             }
             return error.PyError;
         }
