@@ -1581,7 +1581,7 @@ pub const Dict = extern struct {
         }
     }
     pub inline fn updateUnchecked(self: *Dict, other: *Object) c_int {
-        return @ptrCast(c.PyDict_Update(@ptrCast(self), @ptrCast(other)));
+        return c.PyDict_Update(@ptrCast(self), @ptrCast(other));
     }
 
     // Empty an existing dictionary of all key-value pairs.
