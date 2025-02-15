@@ -65,20 +65,36 @@ pub inline fn errorPrintUnchecked() void {
     c.PyErr_Print();
 }
 
-pub inline fn errorString(msg: [:0]const u8) void {
-    c.PyErr_SetString(@ptrCast(msg));
+// Same as PyErr_SetString. This does not steal a referene to exc
+pub inline fn errorSetString(exc: *Object, msg: [:0]const u8) void {
+    c.PyErr_SetString(@ptrCast(exc), @ptrCast(msg));
 }
 
-pub inline fn errorFormat(exc: *Object, msg: [:0]const u8, args: anytype) ?*Object {
-    if (args.len == 0) {
-        c.PyErr_SetString(@ptrCast(exc), @ptrCast(msg));
+// Same as PyErr_SetObject. This does not steal a referene to exc or value
+pub inline fn errorSetObject(exc: *Object, value: *Object) void {
+    c.PyErr_SetObject(@ptrCast(exc), @ptrCast(value));
+}
+
+// This function sets the error indicator and returns null.
+// The exception should be a Python exception class.
+// The format and subsequent parameters help format the error message;
+// String formatting is done using zig's std.fmt.
+// Does not steal a reference to exc.
+// This uses the global python allocator to allocate the message
+pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) ?*Object {
+    if (comptime args.len == 0) {
+        c.PyErr_SetString(@ptrCast(exc), @ptrCast(format));
         return null;
     }
-    return @ptrCast(@call(.auto, c.PyErr_Format, .{
-        @as([*c]c.PyObject, @ptrCast(exc)),
-        msg
-        } ++ args
-    ));
+    const data = std.fmt.allocPrint(allocator, format, args) catch {
+        return memoryError(); // TODO: This squashes the error
+    };
+    defer allocator.free(data);
+    // TODO: is there a way to avoid a copy?
+    const msg = Str.fromSlice(data) catch return null;
+    defer msg.decref();
+    c.PyErr_SetObject(@ptrCast(exc), @ptrCast(msg));
+    return null;
 }
 
 // Helper that is the equivalent to `TypeError(msg)`
@@ -174,6 +190,24 @@ pub inline fn returnNotImplemented() *Object {
         return NotImplemented();
     }
     return NotImplemented().newref();
+}
+
+
+// Only returns true if the object not null and not None
+pub inline fn notNone(obj: anytype) bool {
+    const T = @TypeOf(obj);
+    if (comptime canCastToObject(T)) {
+        return !Object.isNone(@ptrCast(obj));
+    } else if (comptime canCastToOptionalObject(T)) {
+        if (obj) |o| {
+            return !Object.isNone(@ptrCast(o));
+        }
+        return false;
+    } else {
+        @compileError(std.fmt.comptimePrint(
+            "py.notNone must be called with a *Object or ?*Object: got {s}", .{T}
+        ));
+    }
 }
 
 // Re-export the visitproc
@@ -297,13 +331,18 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         }
 
         // Returns a new reference to the type
-        pub inline fn typenewref(self: *T) [*c]Type {
+        pub inline fn typenewref(self: *T) *Type {
             return @ptrCast(c.PyObject_Type(@ptrCast(self)));
         }
 
         // Returns a borrwed reference to the type
         pub inline fn typeref(self: *T) *Type {
             return @ptrCast(c.Py_TYPE(@ptrCast(self)));
+        }
+
+        // Return the type name of the object as a [:0]const u8
+        pub inline fn typeName(self: *T) [:0]const u8 {
+            return std.mem.span(self.typeref().impl.tp_name);
         }
 
         pub inline fn hasAttr(self: *T, attr: *Str) bool {
@@ -327,15 +366,17 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         }
 
         pub inline fn getAttr(self: *T, attr: *Str) !*Object {
-            const r = c.PyObject_GetAttr(@ptrCast(self), @ptrCast(attr));
-            if (r == 0) return error.PyError;
-            return r;
+            if (c.PyObject_GetAttr(@ptrCast(self), @ptrCast(attr))) |r| {
+                return @ptrCast(r);
+            }
+            return error.PyError;
         }
 
         pub inline fn getAttrString(self: *T, attr: [:0]const u8) !*Object {
-            const r = c.PyObject_GetAttrString(@ptrCast(self), @ptrCast(attr));
-            if (r == 0) return error.PyError;
-            return r;
+            if (c.PyObject_GetAttrString(@ptrCast(self), @ptrCast(attr))) |r| {
+                return @ptrCast(r);
+            }
+            return error.PyError;
         }
 
         pub inline fn getAttrOptional(self: *T, attr: *Str) !?*Object {
@@ -630,7 +671,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         // This is the equivalent of the Python expression: callable(*args, **kwargs).
         // Returns new reference
         pub inline fn call(self: *T, args: *Tuple, kwargs: ?*Dict) !*Object {
-            if (self.callGenericUnchecked(args, kwargs)) |r| {
+            if (self.callUnchecked(args, kwargs)) |r| {
                 return r;
             }
             return error.PyError;
@@ -1128,8 +1169,8 @@ pub const Str = extern struct {
     }
 
     // Return data as utf8
-    pub inline fn asString(self: *Str) [*c]const u8 {
-        return c.PyUnicode_AsUTF8(@ptrCast(self));
+    pub inline fn asString(self: *Str) [:0]const u8 {
+        return std.mem.span(c.PyUnicode_AsUTF8(@ptrCast(self)));
     }
 
     // Alias to asString
@@ -1189,7 +1230,7 @@ pub const Tuple = extern struct {
             const ArgType = @typeInfo(@typeInfo(T).Pointer.child).Pointer.child;
             const obj = try self.get(i);
             if (!ArgType.check(obj)) {
-                _ = typeError("Argument at {} must be {}", .{i, @typeName(ArgType)});
+                _ = typeError("Argument at {} must be {}", .{i, ArgType});
                 return error.PyError;
             }
             arg.* = @ptrCast(obj);
@@ -1209,8 +1250,8 @@ pub const Tuple = extern struct {
     }
 
     // Return a new tuple object of size len, or NULL with an exception set on failure.
-    pub inline fn new(len: isize) !*Tuple {
-        if (c.PyTuple_New(len)) |r| {
+    pub inline fn new(len: usize) !*Tuple {
+        if (c.PyTuple_New(@intCast(len))) |r| {
             return @ptrCast(r);
         }
         return error.PyError;
@@ -1228,6 +1269,57 @@ pub const Tuple = extern struct {
             return @ptrCast(r);
         }
         return error.PyError;
+    }
+    pub const pack = newFromArgs;
+
+    // Create a new tuple by adding two tuples together.
+    // The is the same as the python expression: a + b
+    // Returns new reference
+    pub inline fn concat(a: *Tuple, b: *Tuple) !*Tuple {
+        if (!Tuple.checkExact(a) or !Tuple.checkExact(b)) {
+            _ = typeError("concat() both arguments must be tuples", .{});
+            return error.PyError;
+        }
+        const n1 = try a.size();
+        const n2 = try b.size();
+        const r = try Tuple.new(n1 + n2);
+        errdefer r.decref();
+        for (0..n1) |i| {
+            try r.set(i, a.getUnsafe(i).?.newref());
+        }
+        for (0..n2) |i| {
+            try r.set(i+n1, b.getUnsafe(i).?.newref());
+        }
+        return r;
+    }
+
+    // Create a new tuple by adding obj to the beginning
+    // This is the same as the python expression: (obj,) + self
+    // This is does NOT steal a reference to obj.
+    // Returns new reference
+    pub inline fn prepend(self: *Tuple, obj: *Object) !*Tuple {
+        const n = try self.size();
+        const r = try Tuple.new(n+1);
+        errdefer r.decref();
+        try r.set(0, obj.newref());
+        for (0..n) |i| {
+            try r.set(i+1, self.getUnsafe(i).?.newref());
+        }
+        return r;
+    }
+
+    // Create a new tuple by adding obj to the end
+    // This is does NOT steal a reference to obj.
+    // Returns new reference
+    pub inline fn append(self: *Tuple, obj: *Object) !*Tuple {
+        const n = try self.size();
+        const r = try Tuple.new(n+1);
+        errdefer r.decref();
+        for (0..n) |i| {
+            try r.set(i, self.getUnsafe(i).?.newref());
+        }
+        try r.set(n, obj.newref());
+        return r;
     }
 
     // Get size with error checking
@@ -1256,7 +1348,7 @@ pub const Tuple = extern struct {
 
     pub inline fn getUnsafe(self: *Tuple, pos: usize) ?*Object {
         // TODO: fix PyTuple_GET_ITEM
-        return @ptrCast(c.PyTuple_GetItem(@ptrCast(self), pos));
+        return @ptrCast(c.PyTuple_GetItem(@ptrCast(self), @intCast(pos)));
     }
 
     // Insert a reference to object o at position pos of the tuple pointed to by p.
@@ -1324,8 +1416,8 @@ pub const List = extern struct {
 
     // Return a new empty dictionary, or NULL on failure.
     // Returns a new reference
-    pub inline fn new(len: isize) !*List {
-        if (c.PyList_New(len)) |r| {
+    pub inline fn new(len: usize) !*List {
+        if (c.PyList_New(@intCast(len))) |r| {
             return @ptrCast(r);
         }
         return error.PyError;
