@@ -342,7 +342,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
 
         // Return the type name of the object as a [:0]const u8
         pub inline fn typeName(self: *T) [:0]const u8 {
-            return std.mem.span(self.typeref().impl.tp_name);
+            return self.typeref().className();
         }
 
         pub inline fn hasAttr(self: *T, attr: *Str) bool {
@@ -778,6 +778,42 @@ pub inline fn CallProtocol(comptime T: type) type {
     };
 }
 
+pub fn SequenceProtocol(comptime T: type) type {
+    return struct {
+        // Return the first index i for which o[i] == value.
+        // This is equivalent to the Python expression o.index(value).
+        pub fn index(self: *T, obj: *Object) !usize {
+            const i = self.indexUnchecked(obj);
+            if (i < 0) {
+                return error.PyError;
+            }
+            return @intCast(i);
+        }
+
+        // On error, return -1.
+        pub fn indexUnchecked(self: *T, obj: *Object) isize {
+            return c.PySequence_Index(@ptrCast(self), @ptrCast(obj));
+        }
+
+
+        // Determine if o contains value. If an item in o is equal to value, return 1,
+        // otherwise return 0. On error, return -1.
+        // This is equivalent to the Python expression value in o.
+        pub inline fn contains(self: *T, obj: *Object) !bool {
+            const i = self.containsUnchecked(obj);
+            if (i < 0) {
+                return error.PyError;
+            }
+            return i == 1;
+        }
+
+        // On error, return -1.
+        pub inline fn containsUnchecked(self: *T, obj: *Object) c_int {
+            return c.PySequence_Contains(@ptrCast(self), @ptrCast(obj));
+        }
+    };
+}
+
 pub const Object = extern struct {
     pub const BaseType = c.PyObject;
 
@@ -853,6 +889,11 @@ pub const Type = extern struct {
     // Return 0 in all other cases. This function always succeeds.
     pub inline fn checkExact(obj: *Object) bool {
         return c.PyType_CheckExact(@ptrCast(obj)) != 0;
+    }
+
+    // Return the name of this type as a [:0]const u8
+    pub inline fn className(self: *Type) [:0]const u8 {
+        return std.mem.span(self.impl.tp_name);
     }
 
     // Create and return a heap type from the spec (see Py_TPFLAGS_HEAPTYPE).
@@ -1110,6 +1151,9 @@ pub const Str = extern struct {
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 
+    // Import the SequenceProtocol
+    pub usingnamespace SequenceProtocol(@This());
+
     // Return true if the object obj is a Unicode object or an instance of a Unicode subtype.
     // This function always succeeds.
     pub inline fn check(obj: *Object) bool {
@@ -1209,6 +1253,9 @@ pub const Tuple = extern struct {
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 
+    // Import the SequenceProtocol
+    pub usingnamespace SequenceProtocol(@This());
+
     pub inline fn parse(self: *Tuple, format: [:0]const u8, args: anytype) !void {
         const r = @call(.auto, c.PyArg_ParseTuple, .{ @as([*c]c.PyObject, @ptrCast(self)), format } ++ args);
         if (r == 0) return error.PyError;
@@ -1270,6 +1317,8 @@ pub const Tuple = extern struct {
         }
         return error.PyError;
     }
+
+    // This steals a reference to every value.
     pub const pack = newFromArgs;
 
     // Create a new tuple by adding two tuples together.
@@ -1391,6 +1440,8 @@ pub const Tuple = extern struct {
         const end = try self.size();
         return try self.slice(0, end);
     }
+
+
 };
 
 // TODO: Create a ListProtocol()
@@ -1403,6 +1454,9 @@ pub const List = extern struct {
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
+
+    // Import the SequenceProtocol
+    pub usingnamespace SequenceProtocol(@This());
 
     // Return true if p is a list object or an instance of a subtype of the list type. This function always succeeds.
     pub inline fn check(obj: *Object) bool {
