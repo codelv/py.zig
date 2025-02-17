@@ -42,6 +42,14 @@ For each builtin python type `py.zig` defines an equivalent `extern struct` that
 single field `impl` with the underlying python type. For examle a tuple is defined as:
 
 ```zig
+// c-import Python.h
+pub const c = @cImport({
+    @cDefine("PY_SSIZE_T_CLEAN", "1");
+    @cInclude("Python.h");
+});
+
+// ... 
+
 pub const Tuple = extern struct {
     pub const BaseType = c.PyTupleObject;
 
@@ -58,21 +66,32 @@ pub const Tuple = extern struct {
 };
 ```
 
-Since these types have the same datastructure as the c-equivalent you can safetly use `@ptrCast`
-to any C-API functions that take a tuple object. 
+Since these types have the same memory representation as the c-equivalent you can safetly use `@ptrCast`
+and pass them to any functions (C/C++, or whatever) that take a tuple object. 
 
 You can also access any members of the python type using `impl`, directly. For example the `Type` 
-impl can get the name like this:
+can get the name like this:
 
 ```zig
-    // Return the name of this type as a [:0]const u8
+pub const Type = extern struct {
+    pub const BaseType = c.PyTypeObject;
+
+    // The underlying python structure
+    impl: BaseType,
+    
+    // ... 
+    
+    // Return the name of this type
     pub inline fn className(self: *Type) [:0]const u8 {
         return std.mem.span(self.impl.tp_name);
     }
+};
 ```
 
-However it is generally recommended to use public C-API functions.
+However it is generally recommended to use public C-API functions as is done with the wrappers in `py.zig`.
+
 
 ## Status
 
-This is very alpha and largely untested.
+This is currently very alpha status and is undergoing breaking changes to functions but the 
+basic design concept is unlikely to change.
