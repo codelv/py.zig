@@ -266,23 +266,10 @@ pub inline fn visit(obj: anytype, func: visitproc, arg: ?*anyopaque) c_int {
 // Invoke the visitor func on all non-null objects and return the first nonzero result if any.
 pub inline fn visitAll(objects: anytype, func: visitproc, arg: ?*anyopaque) c_int {
     inline for (objects) |obj| {
-        const T = @TypeOf(obj);
-        if (comptime canCastToOptionalObject(T)) {
-            if (obj) |p| {
-                const r = func.?(@ptrCast(p), arg);
-                if (r != 0) {
-                    return r;
-                }
-            }
-        } else if (comptime canCastToObject(T)) {
-            const r = func.?(@ptrCast(obj), arg);
-            if (r != 0) {
-                return r;
-            }
-        } else {
-            @compileError(std.fmt.comptimePrint("py.visitAll arguments must be castable to ?*Object, got: {}", .{T}));
+        const r = visit(obj, func, arg);
+        if (r != 0) {
+            return r;
         }
-
     }
     return 0;
 }
@@ -2254,8 +2241,8 @@ pub const Method = extern struct {
 
     // Return the instance associated with the method meth.
     // Returns borrowed reference
-    pub fn owner(self: *Method) !*Object {
-      if (self.ownerUnchecked()) |r| {
+    pub fn getSelf(self: *Method) !*Object {
+      if (c.PyMethod_Self(@ptrCast(self))) |r| {
           return @ptrCast(r);
       }
       return error.PyError;
@@ -2263,18 +2250,12 @@ pub const Method = extern struct {
 
     // Return the function associated with the method meth.
     // Returns borrowed reference
-    pub fn function(self: *Method) !*Function {
-        if (self.functionUnchecked()) |r| {
+    pub fn getFunction(self: *Method) !*Function {
+        if (c.PyMethod_Function(@ptrCast(self))) |r| {
             return @ptrCast(r);
         }
         return error.PyError;
     }
-
-    // Returns borrowed reference
-    pub fn functionUnchecked(self: *Method) ?*Object {
-        return @ptrCast(c.PyMethod_Function(@ptrCast(self)));
-    }
-
 };
 
 
@@ -2401,7 +2382,6 @@ var global_allocator = Allocator{};
 
 pub const allocator = global_allocator.allocator();
 
-test "interpreter init" {
-    initialize();
-    defer finalize();
+test "all" {
+    std.testing.refAllDecls(@This());
 }
