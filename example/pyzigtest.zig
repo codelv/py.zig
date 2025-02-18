@@ -9,11 +9,11 @@ const Module = py.Module;
 pub fn add(mod: *Module, args: [*]*Object, n: isize) ?*Object {
     _ = mod;
     if (n != 2) {
-        return py.typeError("sum requires 2 arguments", .{}) catch null;
+        return py.typeErrorObject("sum requires 2 arguments", .{});
     }
     // We can now safely access  indexes 0 and 1
     if (!Int.check(args[0]) or !Int.check(args[1])) {
-        return py.typeError("both arguments must be ints!", .{}) catch null;
+        return py.typeErrorObject("both arguments must be ints!", .{});
     }
 
     // We can now safely cast to Int objects and access their methods
