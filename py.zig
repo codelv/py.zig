@@ -44,6 +44,14 @@ pub inline fn errorOccurred() ?*Object {
     return @ptrCast(c.PyErr_Occurred());
 }
 
+// Checks if errorOccurred() != null, and if so returns error.PyError otherwise returns null.
+pub inline fn checkErrorOccurred() !?*Object {
+    if (errorOccurred()) |_| {
+        return error.PyError;
+    }
+    return null;
+}
+
 // Clear the error indicator. If the error indicator is not set, there is no effect.
 pub inline fn errorClear() void {
     c.PyErr_Clear();
@@ -456,11 +464,19 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         // This is equivalent to the Python expression iter(o).
         // It returns a new iterator for the object argument, or the object itself if the object is
         // already an iterator.  Raises TypeError and returns NULL if the object cannot be iterated.
-        pub inline fn iter(self: *T) !*Object {
-            if (c.PyObject_GetIter(@ptrCast(self))) |r| {
+        pub inline fn iter(self: *T) !*Iter {
+            if (self.iterUnchecked()) |r| {
+                if (!Iter.check(r)) {
+                    _ = typeError("iter did not return an iterator", .{});
+                    return error.PyError;
+                }
                 return @ptrCast(r);
             }
             return error.PyError;
+        }
+
+        pub inline fn iterUnchecked(self: *T) ?*Object {
+            return @ptrCast(c.PyObject_GetIter(@ptrCast(self)));
         }
 
         // Compute a string representation of object o. Null and type check the result is a Str.
@@ -814,11 +830,28 @@ pub fn SequenceProtocol(comptime T: type) type {
     };
 }
 
-pub const Object = extern struct {
-    pub const BaseType = c.PyObject;
+pub fn IteratorProtocol(comptime T: type) type {
+    return struct {
+        // Return the next value from the iterator o. The object must be an iterator according to PyIter_Check()
+        // (it is up to the caller to check this). If there are no remaining values, it returns null
+        // If an error occurs while retrieving the item, it throws error.PyError
+        // Returns new reference
+        pub fn next(self: *T) !?*Object {
+            if (self.nextUnchecked()) |r| {
+                return @ptrCast(r);
+            }
+            return checkErrorOccurred();
+        }
 
+        pub fn nextUnchecked(self: *T) ?*Object {
+            return @ptrCast(c.PyIter_Next(@ptrCast(self)));
+        }
+    };
+}
+
+pub const Object = extern struct {
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -842,14 +875,28 @@ pub const Object = extern struct {
 };
 
 
+pub const Iter = struct {
+    // The underlying python structure
+    impl: c.PyObject,
+
+    // Import the object protocol
+    pub usingnamespace ObjectProtocol(@This());
+
+    // Import the iterarator
+    pub usingnamespace IteratorProtocol(@This());
+
+    pub fn check(obj: *Object) bool {
+        return c.PyIter_Check(@ptrCast(obj)) != 0;
+    }
+
+};
+
 pub const TypeSlot = c.PyType_Slot;
 pub const TypeSpec = c.PyType_Spec;
 
 pub const Type = extern struct {
-    pub const BaseType = c.PyTypeObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyTypeObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -930,17 +977,14 @@ pub const Type = extern struct {
 };
 
 pub const Metaclass = extern struct {
-    pub const BaseType = c.PyHeapTypeObject;
-    impl: BaseType,
+    impl: c.PyHeapTypeObject,
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 };
 
 pub const Bool = extern struct {
-    pub const BaseType = c.PyLongObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyLongObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -960,10 +1004,8 @@ pub const Bool = extern struct {
 };
 
 pub const Int = extern struct {
-    pub const BaseType = c.PyLongObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyLongObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1063,10 +1105,7 @@ pub const Int = extern struct {
 };
 
 pub const Float = extern struct {
-    pub const BaseType = c.PyFloatObject;
-
-    // The underlying python structure
-    impl: BaseType,
+    impl: c.PyFloatObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1143,10 +1182,8 @@ const PyUnicodeObject = extern struct {
 };
 
 pub const Str = extern struct {
-    pub const BaseType = PyUnicodeObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: PyUnicodeObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1223,10 +1260,8 @@ pub const Str = extern struct {
 
 
 pub const Bytes = extern struct {
-    pub const BaseType = c.PyBytesObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyBytesObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1245,10 +1280,8 @@ pub const Bytes = extern struct {
 };
 
 pub const Tuple = extern struct {
-    pub const BaseType = c.PyTupleObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyTupleObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1305,21 +1338,34 @@ pub const Tuple = extern struct {
     }
 
     // Return a new tuple filled with the provided values from a zig tuple.
-    // This steals a reference to every value.
-    pub inline fn newFromArgs(args: anytype) !*Tuple {
-        if (c.PyTuple_New(args.len)) |r| {
-            inline for (args, 0..) |arg, i| {
-                // FIXME: Zig thinks this writes out of bounds
-                //c.PyTuple_SET_ITEM(@ptrCast(r), @intCast(i), @ptrCast(arg));
-                _ = c.PyTuple_SetItem(@ptrCast(r), @intCast(i), @ptrCast(arg));
+    // This steals a reference to every item in args.
+    // Returns new reference
+    pub inline fn packStolen(args: anytype) !*Tuple {
+        const tuple = try Tuple.new(args.len);
+        inline for (args, 0..) |arg, i| {
+            const ArgType = @TypeOf(arg);
+            if (!comptime canCastToObject(ArgType)) {
+                @compileError("Cannot pack tuple with non *Object type: " ++ @typeName(ArgType));
             }
-            return @ptrCast(r);
+            tuple.setUnsafe(i, arg);
         }
-        return error.PyError;
+        return tuple;
     }
 
-    // This steals a reference to every value.
-    pub const pack = newFromArgs;
+    // Return a new tuple filled with the provided values from a zig tuple.
+    // This creates a new reference to every item in args.
+    // Returns new reference
+    pub inline fn packNewrefs(args: anytype) !*Tuple {
+        const tuple = try Tuple.new(args.len);
+        inline for (args, 0..) |arg, i| {
+            const ArgType = @TypeOf(arg);
+            if (!comptime canCastToObject(ArgType)) {
+                @compileError("Cannot pack tuple with non *Object type: " ++ @typeName(ArgType));
+            }
+            tuple.setUnsafe(i, @ptrCast(arg.newref()));
+        }
+        return tuple;
+    }
 
     // Create a new tuple by adding two tuples together.
     // The is the same as the python expression: a + b
@@ -1400,7 +1446,7 @@ pub const Tuple = extern struct {
         return @ptrCast(c.PyTuple_GetItem(@ptrCast(self), @intCast(pos)));
     }
 
-    // Insert a reference to object o at position pos of the tuple pointed to by p.
+    // Insert a _stolen_ reference to object o at position pos of the tuple pointed to by p.
     // If pos is out of bounds, return -1 and set an IndexError exception.
     // This function “steals” a reference to o and discards a reference to an item already
     // in the tuple at the affected position.
@@ -1413,8 +1459,11 @@ pub const Tuple = extern struct {
     // Same as set but no error checking. This function “steals” a reference to o, and,
     // unlike PyTuple_SetItem(), does not discard a reference to any item that is being replaced;
     // any reference in the tuple at position pos will be leaked.
-    pub inline fn setUnsafe(self: *Tuple, pos: usize, obj: *Object) c_int {
-        return c.PyTuple_SET_ITEM(@ptrCast(self), @intCast(pos), @ptrCast(obj));
+    pub inline fn setUnsafe(self: *Tuple, pos: usize, obj: *Object) void {
+        // The tuple struct only has one item so zig (correctly) thinks this is writing
+        // out of bounds. This is marked unsafe for a reason.
+        const r = c.PyTuple_SetItem(@ptrCast(self), @intCast(pos), @ptrCast(obj));
+        std.debug.assert(r >= 0);
     }
 
     // Return the slice of the tuple pointed to by p between low and high,
@@ -1447,10 +1496,8 @@ pub const Tuple = extern struct {
 // TODO: Create a ListProtocol()
 
 pub const List = extern struct {
-    pub const BaseType = c.PyListObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyListObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1667,12 +1714,11 @@ pub const List = extern struct {
 // TODO: Create a DictProtocol()?
 
 pub const Dict = extern struct {
-    pub const BaseType = c.PyDictObject;
     // Iteration item
     pub const Item = struct { key: *Object, value: *Object };
 
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyDictObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -1889,10 +1935,7 @@ pub const Dict = extern struct {
 
 
 pub const Set = extern struct {
-    pub const BaseType = c.PySetObject;
-
-    // The underlying python structure
-    impl: BaseType,
+    impl: c.PySetObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -2039,6 +2082,179 @@ pub const Set = extern struct {
 };
 
 
+pub const Code = extern struct {
+    impl: c.PyTypeObject,
+
+    // Import the object protocol
+    pub usingnamespace ObjectProtocol(@This());
+
+    // Return true if co is a code object. This function always succeeds.
+    pub fn check(obj: *Object) bool {
+        return c.PyCode_Check(@ptrCast(obj)) != 0;
+    }
+
+};
+
+pub const Function = extern struct {
+    impl: c.PyTypeObject,
+
+    // Import the object protocol
+    pub usingnamespace ObjectProtocol(@This());
+
+    // Return true if o is a function object (has type PyFunction_Type).
+    // The parameter must not be NULL. This function always succeeds.
+    pub fn check(obj: *Object) bool {
+        return c.PyFunction_Check(@ptrCast(obj)) != 0;
+    }
+
+    // Return a new function object associated with the code object code.
+    // globals must be a dictionary with the global variables accessible to the function.
+    pub fn new(code: *Code, globals: *Dict) !Function {
+        if (newUnchecked(code, globals)) |f| {
+            return @ptrCast(f);
+        }
+        return error.PyError;
+    }
+
+    // Returns new reference
+    pub fn newUnchecked(code: *Code, globals: *Dict) ?*Object {
+        return @ptrCast(c.PyFunction_New(@ptrCast(code), @ptrCast(globals)));
+    }
+
+    // Return the code object associated with the function object op.
+    // Return value: Borrowed reference.
+    pub fn getCode(self: *Function) !*Code {
+        if (c.PyFunction_GetCode(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    // Return the globals dictionary associated with the function object op.
+    // Return value: Borrowed reference.
+    pub fn getGlobals(self: *Function) !*Dict {
+        if (c.PyFunction_GetGlobals(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    // Return the globals dictionary associated with the function object op.
+    // Return value: Borrowed reference.
+    pub fn getModule(self: *Function) !?*Module {
+        if (c.PyFunction_GetModule(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return @ptrCast(checkErrorOccurred());
+    }
+
+    // Return the argument default values of the function object op.
+    // This can be a tuple of arguments or NULL
+    // Return value: Borrowed reference.
+    pub fn getDefaults(self: *Function) !?*Tuple {
+        if (c.PyFunction_GetDefaults(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return @ptrCast(checkErrorOccurred());
+    }
+
+    // Set the argument default values for the function object op.
+    // defaults must be Py_None or a tuple. Raises SystemError and returns -1 on failure.
+    pub fn setDefaults(self: *Function, defaults: *Tuple) !void {
+        if (c.PyFunction_SetDefaults(@ptrCast(self), @ptrCast(defaults)) < 0) {
+            return error.PyError;
+        }
+    }
+
+    // Return the closure associated with the function object op. This can be NULL or a tuple of cell objects.
+    // Return value: Borrowed reference.
+    pub fn getClosure(self: *Function) !?*Tuple {
+        if (c.PyFunction_GetClosure(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return @ptrCast(checkErrorOccurred());
+    }
+
+    // Set the closure associated with the function object op.
+    // closure must be Py_None or a tuple of cell objects.. Raises SystemError and returns -1 on failure.
+    pub fn setClosure(self: *Function, closure: *Tuple) !void {
+        if (c.PyFunction_SetClosure(@ptrCast(self), @ptrCast(closure)) < 0) {
+            return error.PyError;
+        }
+    }
+
+    // Return the closure associated with the function object op. This can be NULL or a tuple of cell objects.
+    // Return value: Borrowed reference.
+    pub fn getAnnotations(self: *Function) !?*Dict {
+        if (c.PyFunction_GetAnnotations(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return @ptrCast(checkErrorOccurred());
+    }
+
+    // Set the annotations for the function object op.
+    // annotations must be a dictionary or Py_None. Raises SystemError and returns -1 on failure.
+    pub fn setAnnotations(self: *Function, annotations: *Dict) !void {
+        if (c.PyFunction_SetAnnotations(@ptrCast(self), @ptrCast(annotations)) < 0) {
+            return error.PyError;
+        }
+    }
+};
+
+pub const Method = extern struct {
+    impl: c.PyTypeObject,
+
+    // Import the object protocol
+    pub usingnamespace ObjectProtocol(@This());
+
+    // Return true if o is a method object (has type PyMethod_Type).
+    // The parameter must not be NULL. This function always succeeds.
+    pub fn check(obj: *Object) bool {
+       return c.PyMethod_Check(@ptrCast(obj)) != 0;
+    }
+
+    // Return a new method object, with func being any callable object and self the
+    // instance the method should be bound. func is the function that will be called
+    // when the method is called. self must not be NULL.
+    // Returns new reference
+    pub fn new(func: *Function, obj: *Object) !Method {
+        if (newUnchecked(func, obj)) |f| {
+            return @ptrCast(f);
+        }
+        return error.PyError;
+    }
+
+    // Returns new reference
+    pub fn newUnchecked(func: *Function, obj: *Object) ?*Object {
+        return @ptrCast(c.PyMethod_New(@ptrCast(func), @ptrCast(obj)));
+    }
+
+    // Return the instance associated with the method meth.
+    // Returns borrowed reference
+    pub fn owner(self: *Method) !*Object {
+      if (self.ownerUnchecked()) |r| {
+          return @ptrCast(r);
+      }
+      return error.PyError;
+    }
+
+    // Return the function associated with the method meth.
+    // Returns borrowed reference
+    pub fn function(self: *Method) !*Function {
+        if (self.functionUnchecked()) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    // Returns borrowed reference
+    pub fn functionUnchecked(self: *Method) ?*Object {
+        return @ptrCast(c.PyMethod_Function(@ptrCast(self)));
+    }
+
+};
+
+
 pub const Module = extern struct {
     // https://docs.python.org/3/c-api/module.html
     // The underlying python structure
@@ -2099,10 +2315,9 @@ pub const GetSetDef = c.PyGetSetDef;
 pub const SlotDef = c.PyModuleDef_Slot;
 
 pub const ModuleDef = extern struct {
-    const BaseType = c.PyModuleDef;
     const Self = @This();
-    impl: BaseType,
-    pub inline fn new(v: BaseType) Self {
+    impl: c.PyModuleDef,
+    pub inline fn new(v: c.PyModuleDef) Self {
         return Self{ .impl = v };
     }
 

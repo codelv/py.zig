@@ -51,10 +51,8 @@ pub const c = @cImport({
 // ... 
 
 pub const Tuple = extern struct {
-    pub const BaseType = c.PyTupleObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyTupleObject,
 
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
@@ -74,10 +72,8 @@ can get the name like this:
 
 ```zig
 pub const Type = extern struct {
-    pub const BaseType = c.PyTypeObject;
-
     // The underlying python structure
-    impl: BaseType,
+    impl: c.PyTypeObject,
     
     // ... 
     
@@ -95,3 +91,8 @@ However it is generally recommended to use public C-API functions as is done wit
 
 This is currently very alpha status and is undergoing breaking changes to functions but the 
 basic design concept is unlikely to change.
+
+
+## Plans
+
+Auto generate bindings...
