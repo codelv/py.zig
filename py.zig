@@ -110,9 +110,9 @@ pub inline fn typeError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_TypeError), msg, args);
 }
 
-pub inline fn typeErrorObject(msg: [:0]const u8, args: anytype) ?*Object {
-    typeError(msg, args) catch return null;
-    unreachable;
+pub inline fn typeErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+    typeError(msg, args) catch {};
+    return value;
 }
 
 // Helper that is the equivalent to `SystemError(msg)`
@@ -120,9 +120,9 @@ pub inline fn systemError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_SystemError), msg, args);
 }
 
-pub inline fn systemErrorObject(msg: [:0]const u8, args: anytype) ?*Object {
-    systemError(msg, args) catch return null;
-    unreachable;
+pub inline fn systemErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+    systemError(msg, args) catch {};
+    return value;
 }
 
 // Helper that is the equivalent to `ValueError(msg)`
@@ -130,9 +130,9 @@ pub inline fn valueError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_ValueError), msg, args);
 }
 
-pub inline fn valueErrorObject(msg: [:0]const u8, args: anytype) ?*Object {
-    valueError(msg, args) catch return null;
-    unreachable;
+pub inline fn valueErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+    valueError(msg, args) catch {};
+    return value;
 }
 
 // Helper that is the equivalent to `AttributeError(msg)`
@@ -140,9 +140,9 @@ pub inline fn attributeError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_AttributeError), msg, args);
 }
 
-pub inline fn attributeErrorObject(msg: [:0]const u8, args: anytype) ?*Object {
-    attributeError(msg, args) catch return null;
-    unreachable;
+pub inline fn attributeErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+    attributeError(msg, args) catch {};
+    return value;
 }
 
 pub inline fn memoryError() !void {
@@ -150,8 +150,9 @@ pub inline fn memoryError() !void {
     return error.PyError;
 }
 
-pub inline fn memoryErrorObject() ?*Object {
-    return @ptrCast(c.PyErr_NoMemory());
+pub inline fn memoryErrorObject(comptime value: anytype) @TypeOf(value) {
+    memoryError() catch {};
+    return value;
 }
 
 // Clear a reference to **Object or *?*Object
