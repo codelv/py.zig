@@ -4,7 +4,6 @@ pub const c = @cImport({
 });
 const std = @import("std");
 
-
 const VER_312 = 0x030C0000;
 const VER_313 = 0x030D0000;
 
@@ -170,7 +169,7 @@ pub inline fn clear(obj: anytype) void {
 
 // Clear all
 pub inline fn clearAll(objs: anytype) void {
-    inline for(objs) |obj| {
+    inline for (objs) |obj| {
         clear(obj);
     }
 }
@@ -179,15 +178,15 @@ pub inline fn None() *Object {
     return @ptrCast(&c._Py_NoneStruct);
 }
 
-pub inline fn True() *Object{
+pub inline fn True() *Object {
     return @ptrCast(&c._Py_TrueStruct);
 }
 
-pub inline fn False() *Object{
+pub inline fn False() *Object {
     return @ptrCast(&c._Py_FalseStruct);
 }
 
-pub inline fn NotImplemented() *Object{
+pub inline fn NotImplemented() *Object {
     return @ptrCast(&c._Py_NotImplementedStruct);
 }
 
@@ -227,7 +226,6 @@ pub inline fn returnNotImplemented() *Object {
     return NotImplemented().newref();
 }
 
-
 // Only returns true if the object not null and not None
 pub inline fn notNone(obj: anytype) bool {
     const T = @TypeOf(obj);
@@ -239,9 +237,7 @@ pub inline fn notNone(obj: anytype) bool {
         }
         return false;
     } else {
-        @compileError(std.fmt.comptimePrint(
-            "py.notNone must be called with a *Object or ?*Object: got {s}", .{T}
-        ));
+        @compileError(std.fmt.comptimePrint("py.notNone must be called with a *Object or ?*Object: got {s}", .{T}));
     }
 }
 
@@ -300,16 +296,15 @@ pub inline fn parseTupleAndKeywords(args: *Tuple, kwargs: ?*Dict, format: [:0]co
 
 // Check that the given type can be safely casted to a *Object
 pub inline fn canCastToObject(comptime T: type) bool {
-    return switch(@typeInfo(T)) {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| @hasDecl(info.child, "IS_PYOBJECT"),
         else => false,
     };
 }
 
-
 // Check that the given type can be safely casted to a ?*Object
 pub inline fn canCastToOptionalObject(comptime T: type) bool {
-    return switch(@typeInfo(T)) {
+    return switch (@typeInfo(T)) {
         .Optional => |info| canCastToObject(info.child),
         else => false,
     };
@@ -317,16 +312,15 @@ pub inline fn canCastToOptionalObject(comptime T: type) bool {
 
 // Check that the given type can be safely casted to a **Object
 pub inline fn canCastToObjectPtr(comptime T: type) bool {
-    return switch(@typeInfo(T)) {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| canCastToObject(info.child),
         else => false,
     };
 }
 
-
 // Check that the given type can be safely casted to a *?*Object
 pub inline fn canCastToOptionalObjectPtr(comptime T: type) bool {
-    return switch(@typeInfo(T)) {
+    return switch (@typeInfo(T)) {
         .Pointer => |info| canCastToOptionalObject(info.child),
         else => false,
     };
@@ -476,7 +470,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         pub inline fn iter(self: *T) !*Iter {
             if (self.iterUnchecked()) |r| {
                 if (!Iter.check(r)) {
-                    return typeError("iter did not return an iterator", .{});
+                    try typeError("iter did not return an iterator", .{});
                 }
                 return @ptrCast(r);
             }
@@ -494,7 +488,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                     return @ptrCast(s);
                 }
                 // Set an error message
-                return typeError("str did not return a str", .{});
+                try typeError("str did not return a str", .{});
             }
             return error.PyError;
         }
@@ -819,7 +813,6 @@ pub fn SequenceProtocol(comptime T: type) type {
             return c.PySequence_Index(@ptrCast(self), @ptrCast(obj));
         }
 
-
         // Determine if o contains value. If an item in o is equal to value, return 1,
         // otherwise return 0. On error, return -1.
         // This is equivalent to the Python expression value in o.
@@ -882,7 +875,6 @@ pub const Object = extern struct {
     }
 };
 
-
 pub const Iter = struct {
     // The underlying python structure
     impl: c.PyObject,
@@ -896,7 +888,6 @@ pub const Iter = struct {
     pub fn check(obj: *const Object) bool {
         return c.PyIter_Check(@constCast(@ptrCast(obj))) != 0;
     }
-
 };
 
 pub const TypeSlot = c.PyType_Slot;
@@ -1075,7 +1066,7 @@ pub const Int = extern struct {
             usize => return @ptrCast(c.PyLong_FromSize_t(value)),
             c_uint, c_ulong => return @ptrCast(c.PyLong_FromUnsignedLong(value)),
             c_int, c_long => return @ptrCast(c.PyLong_FromLong(value)),
-            comptime_int,c_longlong => return @ptrCast(c.PyLong_FromLongLong(value)),
+            comptime_int, c_longlong => return @ptrCast(c.PyLong_FromLongLong(value)),
             c_ulonglong => return @ptrCast(c.PyLong_FromUnsignedLongLong(value)),
             else => {}, // Might be a float another zig int size
         }
@@ -1109,7 +1100,6 @@ pub const Int = extern struct {
     // Alias
     pub const fromNumber = new;
     pub const fromNumberUnchecked = newUnchecked;
-
 };
 
 pub const Float = extern struct {
@@ -1266,7 +1256,6 @@ pub const Str = extern struct {
     pub const data = asString;
 };
 
-
 pub const Bytes = extern struct {
     // The underlying python structure
     impl: c.PyBytesObject,
@@ -1305,19 +1294,19 @@ pub const Tuple = extern struct {
     pub inline fn parseTyped(self: *Tuple, args: anytype) !void {
         const n = try self.size();
         if (n != args.len) {
-            return typeError("Expected {} arguments got {}", .{args.len, n}); // TODO: Better message
+            return typeError("Expected {} arguments got {}", .{ args.len, n }); // TODO: Better message
         }
-        inline for(args, 0..) |arg, i| {
+        inline for (args, 0..) |arg, i| {
             const T = @TypeOf(arg);
             if (comptime !canCastToObjectPtr(T)) {
-                @compileError(std.fmt.comptimePrint("parseTyped args must be *Object or subclasses: got {}",.{T}));
+                @compileError(std.fmt.comptimePrint("parseTyped args must be *Object or subclasses: got {}", .{T}));
             }
             // Eg var arg: *Str: undefined
             // then &arg is **Str
             const ArgType = @typeInfo(@typeInfo(T).Pointer.child).Pointer.child;
             const obj = try self.get(i);
             if (!ArgType.check(obj)) {
-                return typeError("Argument at {} must be {}", .{i, ArgType});
+                return typeError("Argument at {} must be {}", .{ i, ArgType });
             }
             arg.* = @ptrCast(obj);
         }
@@ -1392,7 +1381,7 @@ pub const Tuple = extern struct {
             try r.set(i, a.getUnsafe(i).?.newref());
         }
         for (0..n2) |i| {
-            try r.set(i+n1, b.getUnsafe(i).?.newref());
+            try r.set(i + n1, b.getUnsafe(i).?.newref());
         }
         return r;
     }
@@ -1403,11 +1392,11 @@ pub const Tuple = extern struct {
     // Returns new reference
     pub inline fn prepend(self: *Tuple, obj: *Object) !*Tuple {
         const n = try self.size();
-        const r = try Tuple.new(n+1);
+        const r = try Tuple.new(n + 1);
         errdefer r.decref();
         try r.set(0, obj.newref());
         for (0..n) |i| {
-            try r.set(i+1, self.getUnsafe(i).?.newref());
+            try r.set(i + 1, self.getUnsafe(i).?.newref());
         }
         return r;
     }
@@ -1417,7 +1406,7 @@ pub const Tuple = extern struct {
     // Returns new reference
     pub inline fn append(self: *Tuple, obj: *Object) !*Tuple {
         const n = try self.size();
-        const r = try Tuple.new(n+1);
+        const r = try Tuple.new(n + 1);
         errdefer r.decref();
         for (0..n) |i| {
             try r.set(i, self.getUnsafe(i).?.newref());
@@ -1498,8 +1487,6 @@ pub const Tuple = extern struct {
         const end = try self.size();
         return try self.slice(0, end);
     }
-
-
 };
 
 // TODO: Create a ListProtocol()
@@ -1718,7 +1705,6 @@ pub const List = extern struct {
         return @ptrCast(c.PyList_AsTuple(@ptrCast(self)));
     }
 };
-
 
 // TODO: Create a DictProtocol()?
 
@@ -1942,7 +1928,6 @@ pub const Dict = extern struct {
     }
 };
 
-
 pub const Set = extern struct {
     impl: c.PySetObject,
 
@@ -2020,7 +2005,6 @@ pub const Set = extern struct {
         return r == 1;
     }
 
-
     // Same as contains with no error checking
     pub fn containsUnchecked(self: *Set, key: *Object) c_int {
         return c.PySet_Contains(@ptrCast(self), @ptrCast(key));
@@ -2087,9 +2071,7 @@ pub const Set = extern struct {
     pub fn clearUnchecked(self: *Set) c_int {
         return c.PySet_Clear(@ptrCast(self));
     }
-
 };
-
 
 pub const Code = extern struct {
     impl: c.PyTypeObject,
@@ -2101,7 +2083,6 @@ pub const Code = extern struct {
     pub fn check(obj: *const Object) bool {
         return c.PyCode_Check(@constCast(@ptrCast(obj))) != 0;
     }
-
 };
 
 pub const Function = extern struct {
@@ -2219,7 +2200,7 @@ pub const Method = extern struct {
     // Return true if o is a method object (has type PyMethod_Type).
     // The parameter must not be NULL. This function always succeeds.
     pub fn check(obj: *Object) bool {
-       return c.PyMethod_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyMethod_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return a new method object, with func being any callable object and self the
@@ -2241,10 +2222,10 @@ pub const Method = extern struct {
     // Return the instance associated with the method meth.
     // Returns borrowed reference
     pub fn getSelf(self: *Method) !*Object {
-      if (c.PyMethod_Self(@ptrCast(self))) |r| {
-          return @ptrCast(r);
-      }
-      return error.PyError;
+        if (c.PyMethod_Self(@ptrCast(self))) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
     }
 
     // Return the function associated with the method meth.
@@ -2256,7 +2237,6 @@ pub const Method = extern struct {
         return error.PyError;
     }
 };
-
 
 pub const Module = extern struct {
     // https://docs.python.org/3/c-api/module.html

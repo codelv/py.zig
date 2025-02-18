@@ -27,7 +27,6 @@ pub fn add(mod: *Module, args: [*]*Object, n: isize) ?*Object {
     return @ptrCast(Int.fromNumber(a + b) catch return null);
 }
 
-
 fn modexec(mod: *py.Module) !c_int {
     const stdout = std.io.getStdOut().writer();
     const s = mod.str() catch return -1;
@@ -52,18 +51,13 @@ pub export fn py_mod_exec(mod: *py.Module) c_int {
 }
 
 var module_methods = [_]py.MethodDef{
-    .{
-            .ml_name="add",
-            .ml_meth=@constCast(@ptrCast(&add)),
-            .ml_flags=py.c.METH_FASTCALL,
-            .ml_doc="Add two numbers"
-    },
-    .{} // sentinel
+    .{ .ml_name = "add", .ml_meth = @constCast(@ptrCast(&add)), .ml_flags = py.c.METH_FASTCALL, .ml_doc = "Add two numbers" },
+    .{}, // sentinel
 };
 
 var module_slots = [_]py.SlotDef{
-    .{.slot = py.c.Py_mod_exec, .value = @constCast(@ptrCast(&py_mod_exec))},
-    .{} // sentinel
+    .{ .slot = py.c.Py_mod_exec, .value = @constCast(@ptrCast(&py_mod_exec)) },
+    .{}, // sentinel
 };
 
 var moduledef = py.ModuleDef.new(.{
@@ -73,6 +67,6 @@ var moduledef = py.ModuleDef.new(.{
     .m_slots = &module_slots,
 });
 
-pub export fn PyInit_pyzigtest( _:*anyopaque ) [*c]Object {
+pub export fn PyInit_pyzigtest(_: *anyopaque) [*c]Object {
     return moduledef.init();
 }
