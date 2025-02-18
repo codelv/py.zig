@@ -9,11 +9,11 @@ const Module = py.Module;
 pub fn add(mod: *Module, args: [*]*Object, n: isize) ?*Object {
     _ = mod;
     if (n != 2) {
-        return py.typeError("sum requires 2 arguments", .{});
+        return py.typeError("sum requires 2 arguments", .{}) catch null;
     }
     // We can now safely access  indexes 0 and 1
     if (!Int.check(args[0]) or !Int.check(args[1])) {
-        return py.typeError("both arguments must be ints!", .{});
+        return py.typeError("both arguments must be ints!", .{}) catch null;
     }
 
     // We can now safely cast to Int objects and access their methods
@@ -47,10 +47,7 @@ pub export fn py_mod_exec(mod: *py.Module) c_int {
         // py.zig uses error.PyError for any error caught from the python c-api
         error.PyError => -1, // Python error
         // Any other errors need to set an error in python
-        else => blk: {
-            _ = py.systemError("module init failed", .{});
-            break :blk -1;
-        },
+        else => py.systemError("module init failed", .{}) catch -1,
     };
 }
 

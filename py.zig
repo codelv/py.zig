@@ -63,7 +63,7 @@ pub inline fn errorClear() void {
 // Call this function only when the error indicator is set.
 // Otherwise it will cause a fatal error!
 pub inline fn errorPrint() void {
-    if (errorOccurred()) {
+    if (errorOccurred()) |_| {
         errorPrintUnchecked();
     }
 }
@@ -89,43 +89,46 @@ pub inline fn errorSetObject(exc: *Object, value: *Object) void {
 // String formatting is done using zig's std.fmt.
 // Does not steal a reference to exc.
 // This uses the global python allocator to allocate the message
-pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) ?*Object {
+pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) Error!void {
     if (comptime args.len == 0) {
         c.PyErr_SetString(@ptrCast(exc), @ptrCast(format));
-        return null;
+        return error.PyError;
     }
     const data = std.fmt.allocPrint(allocator, format, args) catch {
         return memoryError(); // TODO: This squashes the error
     };
     defer allocator.free(data);
     // TODO: is there a way to avoid a copy?
-    const msg = Str.fromSlice(data) catch return null;
+    const msg = try Str.fromSlice(data); // TODO: This squashes the error
     defer msg.decref();
     c.PyErr_SetObject(@ptrCast(exc), @ptrCast(msg));
-    return null;
+    return error.PyError;
 }
 
 // Helper that is the equivalent to `TypeError(msg)`
-pub inline fn typeError(msg: [:0]const u8, args: anytype) ?*Object {
+pub inline fn typeError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_TypeError), msg, args);
 }
 
+
 // Helper that is the equivalent to `SystemError(msg)`
-pub inline fn systemError(msg: [:0]const u8, args: anytype) ?*Object {
+pub inline fn systemError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_SystemError), msg, args);
 }
 
 // Helper that is the equivalent to `ValueError(msg)`
-pub inline fn valueError(msg: [:0]const u8, args: anytype) ?*Object {
+pub inline fn valueError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_ValueError), msg, args);
 }
 
-pub inline fn attributeError(msg: [:0]const u8, args: anytype) ?*Object {
+// Helper that is the equivalent to `AttributeError(msg)`
+pub inline fn attributeError(msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_AttributeError), msg, args);
 }
 
-pub inline fn memoryError() ?*Object {
-    return @ptrCast(c.PyErr_NoMemory());
+pub inline fn memoryError() !void {
+    _ = c.PyErr_NoMemory();
+    return error.PyError;
 }
 
 // Clear a reference to **Object or *?*Object
@@ -467,8 +470,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         pub inline fn iter(self: *T) !*Iter {
             if (self.iterUnchecked()) |r| {
                 if (!Iter.check(r)) {
-                    _ = typeError("iter did not return an iterator", .{});
-                    return error.PyError;
+                    return typeError("iter did not return an iterator", .{});
                 }
                 return @ptrCast(r);
             }
@@ -486,7 +488,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                     return @ptrCast(s);
                 }
                 // Set an error message
-                _ = typeError("str did not return a str", .{});
+                return typeError("str did not return a str", .{});
             }
             return error.PyError;
         }
@@ -712,7 +714,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         // Calls PyObject_CallNoArgs. PyObject_CallOneArg, or
         // Return the result of the call on success, or raise an exception and return NULL on failure.
         pub inline fn callArgsUnchecked(self: *T, args: anytype) ?*Object {
-            return @ptrCast(switch (args.len) {
+            return @ptrCast(switch (comptime args.len) {
                 0 => c.PyObject_CallNoArgs(@ptrCast(self)),
                 1 => c.PyObject_CallOneArg(@ptrCast(self), @ptrCast(args[0])),
                 else => blk: {
@@ -754,7 +756,7 @@ pub inline fn CallProtocol(comptime T: type) type {
 
         // Same as callMethod with no error checking
         pub inline fn callMethodUnchecked(self: *T, name: *Str, args: anytype) ?*Object {
-            return @ptrCast(switch (args.len) {
+            return @ptrCast(switch (comptime args.len) {
                 0 => c.PyObject_CallMethodNoArgs(@ptrCast(self), @ptrCast(name)),
                 1 => c.PyObject_CallMethodOneArg(@ptrCast(self), @ptrCast(name), @ptrCast(args[0])),
                 else => blk: {
@@ -1297,8 +1299,7 @@ pub const Tuple = extern struct {
     pub inline fn parseTyped(self: *Tuple, args: anytype) !void {
         const n = try self.size();
         if (n != args.len) {
-            _ = typeError("Expected {} arguments got {}", .{args.len, n}); // TODO: Better message
-            return error.PyError;
+            return typeError("Expected {} arguments got {}", .{args.len, n}); // TODO: Better message
         }
         inline for(args, 0..) |arg, i| {
             const T = @TypeOf(arg);
@@ -1310,8 +1311,7 @@ pub const Tuple = extern struct {
             const ArgType = @typeInfo(@typeInfo(T).Pointer.child).Pointer.child;
             const obj = try self.get(i);
             if (!ArgType.check(obj)) {
-                _ = typeError("Argument at {} must be {}", .{i, ArgType});
-                return error.PyError;
+                return typeError("Argument at {} must be {}", .{i, ArgType});
             }
             arg.* = @ptrCast(obj);
         }
@@ -1372,8 +1372,7 @@ pub const Tuple = extern struct {
     // Returns new reference
     pub inline fn concat(a: *Tuple, b: *Tuple) !*Tuple {
         if (!Tuple.checkExact(a) or !Tuple.checkExact(b)) {
-            _ = typeError("concat() both arguments must be tuples", .{});
-            return error.PyError;
+            return typeError("concat() both arguments must be tuples", .{});
         }
         const n1 = try a.size();
         const n2 = try b.size();
