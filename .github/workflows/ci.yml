@@ -10,7 +10,10 @@ jobs:
             sudo snap install --beta --classic zig
             pip install pytest
             zig version
+      - name: Run zig tests
+        run: zig test py.zig -I/usr/include -I$(python -c "import sysconfig;print(sysconfig.get_path(\"include\"))") -L$(python -c "import sysconfig;print(sysconfig.get_config_var(\"LIBDIR\"))") -lpython$(python -c "import sysconfig;print(sysconfig.get_python_version())")
       - name: Build example
         run: pip install ./example
-      - name: Test example
+      - name: Run pytests
         run: pytest tests
+
