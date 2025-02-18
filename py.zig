@@ -352,18 +352,13 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return @ptrCast(c.Py_NewRef(@ptrCast(self)));
         }
 
-        // Returns a new reference to the type
-        pub inline fn typenewref(self: *T) *Type {
-            return @ptrCast(c.PyObject_Type(@ptrCast(self)));
-        }
-
         // Returns a borrwed reference to the type
-        pub inline fn typeref(self: *T) *Type {
-            return @ptrCast(c.Py_TYPE(@ptrCast(self)));
+        pub inline fn typeref(self: *const T) *Type {
+            return @ptrCast(c.Py_TYPE(@constCast(@ptrCast(self))));
         }
 
         // Return the type name of the object as a [:0]const u8
-        pub inline fn typeName(self: *T) [:0]const u8 {
+        pub inline fn typeName(self: *const T) [:0]const u8 {
             return self.typeref().className();
         }
 
@@ -523,21 +518,21 @@ pub inline fn ObjectProtocol(comptime T: type) type {
 
         // Return non-zero if the object o is of type type or a subtype of type,
         // and 0 otherwise. Both parameters must be non-NULL.
-        pub inline fn typeCheck(self: *T, tp: *Type) bool {
-            return c.PyObject_TypeCheck(@ptrCast(self), @ptrCast(tp)) != 0;
+        pub inline fn typeCheck(self: *const T, tp: *const Type) bool {
+            return c.PyObject_TypeCheck(@constCast(@ptrCast(self)), @constCast(@ptrCast(tp))) != 0;
         }
 
         // Shortcut to check that the given pointer for correctly typed
         // This is equivalent to `T.check(@ptrCast(self))`
         // If this returns false it means *T was incorrectly casted or the assumed type is wrong
-        pub inline fn typeCheckSelf(self: *T) bool {
+        pub inline fn typeCheckSelf(self: *const T) bool {
             return T.check(@ptrCast(self));
         }
 
         // Shortcut to check that the given pointer for correctly typed
         // This is equivalent to `T.checkExact(@ptrCast(self))`
         // If this returns false it means *T was incorrectly casted or the assumed type is wrong
-        pub inline fn typeCheckExactSelf(self: *T) bool {
+        pub inline fn typeCheckExactSelf(self: *const T) bool {
             return T.checkExact(@ptrCast(self));
         }
 
@@ -898,8 +893,8 @@ pub const Iter = struct {
     // Import the iterarator
     pub usingnamespace IteratorProtocol(@This());
 
-    pub fn check(obj: *Object) bool {
-        return c.PyIter_Check(@ptrCast(obj)) != 0;
+    pub fn check(obj: *const Object) bool {
+        return c.PyIter_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
 };
@@ -941,18 +936,18 @@ pub const Type = extern struct {
 
     // Return true if the object o is a type object, including instances of types derived
     // from the standard type object. Return 0 in all other cases. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyType_Check(@ptrCast(obj)) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyType_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return non-zero if the object o is a type object, but not a subtype of the standard type object.
     // Return 0 in all other cases. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyType_CheckExact(@ptrCast(obj)) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyType_CheckExact(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return the name of this type as a [:0]const u8
-    pub inline fn className(self: *Type) [:0]const u8 {
+    pub inline fn className(self: *const Type) [:0]const u8 {
         return std.mem.span(self.impl.tp_name);
     }
 
@@ -1002,8 +997,8 @@ pub const Bool = extern struct {
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 
-    pub inline fn check(obj: *Object) bool {
-        return c.PyBool_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyBool_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
     pub const checkExact = check;
 
@@ -1024,13 +1019,13 @@ pub const Int = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if its argument is a PyLongObject or a subtype of PyLongObject. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyLong_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyLong_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if its argument is a PyLongObject, but not a subtype of PyLongObject. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyLong_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyLong_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Convert to the given zig type
@@ -1124,13 +1119,13 @@ pub const Float = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if its argument is a PyFloatObject or a subtype of PyFloatObject. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyFloat_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyFloat_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if its argument is a PyFloatObject, but not a subtype of PyFloatObject. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyFloat_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyFloat_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Get the value of the Float object as the given type with error checking.
@@ -1206,14 +1201,14 @@ pub const Str = extern struct {
 
     // Return true if the object obj is a Unicode object or an instance of a Unicode subtype.
     // This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyUnicode_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyUnicode_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if the object obj is a Unicode object, but not an instance of a subtype.
     // This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyUnicode_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyUnicode_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return the length of the Unicode string, in code points. unicode has to be a
@@ -1280,13 +1275,13 @@ pub const Bytes = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if the object o is a bytes object or an instance of a subtype of the bytes type. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyBytes_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyBytes_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if the object o is a bytes object, but not an instance of a subtype of the bytes type. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyBytes_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyBytes_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // TODO: finish
@@ -1330,22 +1325,26 @@ pub const Tuple = extern struct {
 
     // Return true if p is a tuple object or an instance of a subtype of the tuple type.
     // This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyTuple_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyTuple_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if p is a tuple object, but not an instance of a subtype of the tuple type.
     // This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyTuple_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyTuple_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new tuple object of size len, or NULL with an exception set on failure.
     pub inline fn new(len: usize) !*Tuple {
-        if (c.PyTuple_New(@intCast(len))) |r| {
+        if (newUnchecked(len)) |r| {
             return @ptrCast(r);
         }
         return error.PyError;
+    }
+
+    pub inline fn newUnchecked(len: usize) ?*Object {
+        return @ptrCast(c.PyTuple_New(@intCast(len)));
     }
 
     // Return a new tuple filled with the provided values from a zig tuple.
@@ -1516,13 +1515,13 @@ pub const List = extern struct {
     pub usingnamespace SequenceProtocol(@This());
 
     // Return true if p is a list object or an instance of a subtype of the list type. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyList_Check(@ptrCast(obj)) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyList_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return true if p is a list object, but not an instance of a subtype of the list type. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyList_Check(@ptrCast(obj)) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyList_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return a new empty dictionary, or NULL on failure.
@@ -1734,13 +1733,13 @@ pub const Dict = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if p is a dict object or an instance of a subtype of the dict type. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyDict_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyDict_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if p is a dict object, but not an instance of a subtype of the dict type. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyDict_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyDict_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new empty dictionary, or NULL on failure.
@@ -1951,12 +1950,12 @@ pub const Set = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if p is a set object or an instance of a subtype. This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
+    pub inline fn check(obj: *const Object) bool {
         return c.PySet_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
     }
 
     // Return true if p is a set object but not an instance of a subtype. This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
+    pub inline fn checkExact(obj: *const Object) bool {
         return c.PySet_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
     }
 
@@ -2099,8 +2098,8 @@ pub const Code = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if co is a code object. This function always succeeds.
-    pub fn check(obj: *Object) bool {
-        return c.PyCode_Check(@ptrCast(obj)) != 0;
+    pub fn check(obj: *const Object) bool {
+        return c.PyCode_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
 };
@@ -2113,8 +2112,8 @@ pub const Function = extern struct {
 
     // Return true if o is a function object (has type PyFunction_Type).
     // The parameter must not be NULL. This function always succeeds.
-    pub fn check(obj: *Object) bool {
-        return c.PyFunction_Check(@ptrCast(obj)) != 0;
+    pub fn check(obj: *const Object) bool {
+        return c.PyFunction_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return a new function object associated with the code object code.
@@ -2220,7 +2219,7 @@ pub const Method = extern struct {
     // Return true if o is a method object (has type PyMethod_Type).
     // The parameter must not be NULL. This function always succeeds.
     pub fn check(obj: *Object) bool {
-       return c.PyMethod_Check(@ptrCast(obj)) != 0;
+       return c.PyMethod_Check(@constCast(@ptrCast(obj))) != 0;
     }
 
     // Return a new method object, with func being any callable object and self the
@@ -2269,14 +2268,14 @@ pub const Module = extern struct {
 
     // Return true if p is a module object, or a subtype of a module object.
     // This function always succeeds.
-    pub inline fn check(obj: *Object) bool {
-        return c.PyModule_Check(@ptrCast(obj)) == 1;
+    pub inline fn check(obj: *const Object) bool {
+        return c.PyModule_Check(@constCast(@ptrCast(obj))) == 1;
     }
 
     // Return true if p is a module object, but not a subtype of PyModule_Type.
     // This function always succeeds.
-    pub inline fn checkExact(obj: *Object) bool {
-        return c.PyModule_CheckExact(@ptrCast(obj)) == 1;
+    pub inline fn checkExact(obj: *const Object) bool {
+        return c.PyModule_CheckExact(@constCast(@ptrCast(obj))) == 1;
     }
 
     // Add an object to module as name. This is a convenience function which can be used
@@ -2315,6 +2314,7 @@ pub inline fn importModule(name: [:0]const u8) !*Module {
 }
 
 pub const MethodDef = c.PyMethodDef;
+pub const MemberDef = c.PyMemberDef;
 pub const GetSetDef = c.PyGetSetDef;
 pub const SlotDef = c.PyModuleDef_Slot;
 
