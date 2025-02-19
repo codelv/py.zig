@@ -1936,12 +1936,12 @@ pub const Set = extern struct {
 
     // Return true if p is a set object or an instance of a subtype. This function always succeeds.
     pub inline fn check(obj: *const Object) bool {
-        return c.PySet_Check(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+        return c.PySet_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj))));
     }
 
     // Return true if p is a set object but not an instance of a subtype. This function always succeeds.
     pub inline fn checkExact(obj: *const Object) bool {
-        return c.PySet_CheckExact(@as([*c]c.PyObject, @ptrCast(obj))) != 0;
+        return c.PySet_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new set containing objects returned by the iterable.
@@ -1976,6 +1976,11 @@ pub const Set = extern struct {
     // Same as newFrozen but does not check for errors
     pub inline fn newFrozenUnchecked(iterable: ?*Object) ?*Set {
         return @ptrCast(c.PyFrozenSet_New(@ptrCast(iterable)));
+    }
+
+    // Create a copy of this set
+    pub fn copy(self: *Set) !*Set {
+        return try new(@ptrCast(self));
     }
 
     // Get the size and check for errors.
@@ -2081,7 +2086,7 @@ pub const Code = extern struct {
 
     // Return true if co is a code object. This function always succeeds.
     pub fn check(obj: *const Object) bool {
-        return c.PyCode_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyCode_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 };
 
@@ -2094,12 +2099,12 @@ pub const Function = extern struct {
     // Return true if o is a function object (has type PyFunction_Type).
     // The parameter must not be NULL. This function always succeeds.
     pub fn check(obj: *const Object) bool {
-        return c.PyFunction_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyFunction_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new function object associated with the code object code.
     // globals must be a dictionary with the global variables accessible to the function.
-    pub fn new(code: *Code, globals: *Dict) !Function {
+    pub fn new(code: *Code, globals: *Dict) !*Function {
         if (newUnchecked(code, globals)) |f| {
             return @ptrCast(f);
         }
@@ -2135,7 +2140,7 @@ pub const Function = extern struct {
         if (c.PyFunction_GetModule(@ptrCast(self))) |r| {
             return @ptrCast(r);
         }
-        return @ptrCast(checkErrorOccurred());
+        return @ptrCast(try checkErrorOccurred());
     }
 
     // Return the argument default values of the function object op.
@@ -2145,7 +2150,7 @@ pub const Function = extern struct {
         if (c.PyFunction_GetDefaults(@ptrCast(self))) |r| {
             return @ptrCast(r);
         }
-        return @ptrCast(checkErrorOccurred());
+        return @ptrCast(try checkErrorOccurred());
     }
 
     // Set the argument default values for the function object op.
@@ -2162,7 +2167,7 @@ pub const Function = extern struct {
         if (c.PyFunction_GetClosure(@ptrCast(self))) |r| {
             return @ptrCast(r);
         }
-        return @ptrCast(checkErrorOccurred());
+        return @ptrCast(try checkErrorOccurred());
     }
 
     // Set the closure associated with the function object op.
@@ -2179,7 +2184,7 @@ pub const Function = extern struct {
         if (c.PyFunction_GetAnnotations(@ptrCast(self))) |r| {
             return @ptrCast(r);
         }
-        return @ptrCast(checkErrorOccurred());
+        return @ptrCast(try checkErrorOccurred());
     }
 
     // Set the annotations for the function object op.
@@ -2200,14 +2205,14 @@ pub const Method = extern struct {
     // Return true if o is a method object (has type PyMethod_Type).
     // The parameter must not be NULL. This function always succeeds.
     pub fn check(obj: *Object) bool {
-        return c.PyMethod_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyMethod_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new method object, with func being any callable object and self the
     // instance the method should be bound. func is the function that will be called
     // when the method is called. self must not be NULL.
     // Returns new reference
-    pub fn new(func: *Function, obj: *Object) !Method {
+    pub fn new(func: *Function, obj: *Object) !*Method {
         if (newUnchecked(func, obj)) |f| {
             return @ptrCast(f);
         }
@@ -2363,5 +2368,11 @@ var global_allocator = Allocator{};
 pub const allocator = global_allocator.allocator();
 
 test "all" {
+    @setEvalBranchQuota(10000);
     std.testing.refAllDecls(@This());
+    // refAllDeclsRecursive(@This()) doesn't work due to a problem
+    // with translating the bitfield in PyUnicodeObject
+    inline for (.{ Object, Type, Metaclass, Bool, Int, Float, Str, Bytes, Tuple, List, Dict, Set, Code, Function, Method, Module, Allocator }) |T| {
+        std.testing.refAllDeclsRecursive(T);
+    }
 }
