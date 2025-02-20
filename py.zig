@@ -1019,6 +1019,12 @@ pub const Int = extern struct {
         return c.PyLong_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
+    // Returns 1 if o is an index integer (has the nb_index slot of the tp_as_number structure filled in), and 0 otherwise.
+    // This function always succeeds.
+    pub inline fn checkIndex(obj: *const Object) bool {
+        return c.PyIndex_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
+    }
+
     // Convert to the given zig type
     pub inline fn as(self: *Int, comptime T: type) !T {
         comptime var error_value = -1;
@@ -1276,6 +1282,34 @@ pub const Bytes = extern struct {
     // TODO: finish
 };
 
+pub const Slice = extern struct {
+    // The underlying python structure
+    impl: c.PySliceObject,
+
+    // Import the object protocol
+    pub usingnamespace ObjectProtocol(@This());
+
+    // Return true if ob is a slice object; ob must not be NULL. This function always succeeds.
+    pub inline fn check(obj: *const Object) bool {
+        return c.PySlice_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
+    }
+
+    // Return a new slice object with the given values.
+    // The start, stop, and step parameters are used as the values of the slice object attributes of the same names.
+    // Any of the values may be NULL, in which case the None will be used for the corresponding attribute.
+    // Returns new reference
+    pub inline fn new(start: ?*Object, stop: ?*Object, step: ?*Object) !*Slice {
+        if (newUnchecked(start, stop, step)) |r| {
+            return @ptrCast(r);
+        }
+        return error.PyError;
+    }
+
+    pub inline fn newUnchecked(start: ?*Object, stop: ?*Object, step: ?*Object) ?*Object {
+        return @ptrCast(c.PySlice_New(@ptrCast(start), @ptrCast(stop), @ptrCast(step)));
+    }
+};
+
 pub const Tuple = extern struct {
     // The underlying python structure
     impl: c.PyTupleObject,
@@ -1378,10 +1412,10 @@ pub const Tuple = extern struct {
         const r = try Tuple.new(n1 + n2);
         errdefer r.decref();
         for (0..n1) |i| {
-            try r.set(i, a.getUnsafe(i).?.newref());
+            r.setUnsafe(i, a.getUnsafe(i).?.newref());
         }
         for (0..n2) |i| {
-            try r.set(i + n1, b.getUnsafe(i).?.newref());
+            r.setUnsafe(i + n1, b.getUnsafe(i).?.newref());
         }
         return r;
     }
@@ -1394,9 +1428,9 @@ pub const Tuple = extern struct {
         const n = try self.size();
         const r = try Tuple.new(n + 1);
         errdefer r.decref();
-        try r.set(0, obj.newref());
+        r.setUnsafe(0, obj.newref());
         for (0..n) |i| {
-            try r.set(i + 1, self.getUnsafe(i).?.newref());
+            r.setUnsafe(i + 1, self.getUnsafe(i).?.newref());
         }
         return r;
     }
@@ -1409,9 +1443,9 @@ pub const Tuple = extern struct {
         const r = try Tuple.new(n + 1);
         errdefer r.decref();
         for (0..n) |i| {
-            try r.set(i, self.getUnsafe(i).?.newref());
+            r.setUnsafe(i, self.getUnsafe(i).?.newref());
         }
-        try r.set(n, obj.newref());
+        r.setUnsafe(n, obj.newref());
         return r;
     }
 
@@ -1439,9 +1473,13 @@ pub const Tuple = extern struct {
         return error.PyError;
     }
 
+    // Returns borrowed reference with no error checking
     pub inline fn getUnsafe(self: *Tuple, pos: usize) ?*Object {
-        // TODO: fix PyTuple_GET_ITEM
-        return @ptrCast(c.PyTuple_GetItem(@ptrCast(self), @intCast(pos)));
+        std.debug.assert(Tuple.check(@ptrCast(self)));
+        // Weird casting is because zig (correctly) thinks it goes OOB
+        // becaues it's defined as a single item array
+        const items: [*]*Object = @ptrCast(&self.impl.ob_item);
+        return items[pos];
     }
 
     // Insert a _stolen_ reference to object o at position pos of the tuple pointed to by p.
@@ -1459,9 +1497,10 @@ pub const Tuple = extern struct {
     // any reference in the tuple at position pos will be leaked.
     pub inline fn setUnsafe(self: *Tuple, pos: usize, obj: *Object) void {
         // The tuple struct only has one item so zig (correctly) thinks this is writing
-        // out of bounds. This is marked unsafe for a reason.
-        const r = c.PyTuple_SetItem(@ptrCast(self), @intCast(pos), @ptrCast(obj));
-        std.debug.assert(r >= 0);
+        // out of bounds. Hence the weird cast
+        std.debug.assert(Tuple.check(@ptrCast(self)));
+        const items: [*]*Object = @ptrCast(&self.impl.ob_item);
+        items[pos] = @ptrCast(obj);
     }
 
     // Return the slice of the tuple pointed to by p between low and high,
@@ -1557,8 +1596,9 @@ pub const List = extern struct {
 
     // Get borrowed refernce to list item at index without type or bounds checking
     // Calls PyList_GET_ITEM(self, index).
-    pub inline fn getUnsafe(self: *List, index: isize) ?*Object {
-        return c.PyList_GET_ITEM(@ptrCast(self), index);
+    pub inline fn getUnsafe(self: *List, index: usize) ?*Object {
+        std.debug.assert(List.check(@ptrCast(self)));
+        return @ptrCast(self.impl.ob_item[index]);
     }
 
     // Set the item at index index in list to item. Return 0 on success.
@@ -1582,8 +1622,9 @@ pub const List = extern struct {
     // content. This macro “steals” a reference to item, and, unlike PyList_SetItem(),
     // does not discard a reference to any item that is being replaced;
     // any reference in list at position i will be leaked.
-    pub inline fn setUnsafe(self: *List, index: isize, item: *Object) c_int {
-        return c.PyList_SET_ITEM(@ptrCast(self), index, item);
+    pub inline fn setUnsafe(self: *List, index: isize, item: *Object) void {
+        std.debug.assert(List.check(@ptrCast(self)));
+        self.impl.ob_item[index] = @ptrCast(item);
     }
 
     // Insert the item item into list list in front of index index.
@@ -1950,6 +1991,16 @@ pub const Set = extern struct {
         return c.PySet_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
+    // Return true if p is a set object, a frozenset object, or an instance of a subtype. This function always succeeds.
+    pub inline fn checkAny(obj: *const Object) bool {
+        return c.PyAnySet_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj))));
+    }
+
+    // Return true if p is a set object or a frozenset object but not an instance of a subtype. This function always succeeds.
+    pub inline fn checkAnyExact(obj: *const Object) bool {
+        return c.PyAnySet_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj))));
+    }
+
     // Return a new set containing objects returned by the iterable.
     // The iterable may be NULL to create a new empty set.
     // Raise TypeError if iterable is not actually iterable.
@@ -2210,7 +2261,7 @@ pub const Method = extern struct {
 
     // Return true if o is a method object (has type PyMethod_Type).
     // The parameter must not be NULL. This function always succeeds.
-    pub fn check(obj: *Object) bool {
+    pub fn check(obj: *const Object) bool {
         return c.PyMethod_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
