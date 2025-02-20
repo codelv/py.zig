@@ -1503,12 +1503,12 @@ pub const List = extern struct {
 
     // Return true if p is a list object or an instance of a subtype of the list type. This function always succeeds.
     pub inline fn check(obj: *const Object) bool {
-        return c.PyList_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyList_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return true if p is a list object, but not an instance of a subtype of the list type. This function always succeeds.
     pub inline fn checkExact(obj: *const Object) bool {
-        return c.PyList_Check(@constCast(@ptrCast(obj))) != 0;
+        return c.PyList_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
     // Return a new empty dictionary, or NULL on failure.
@@ -1518,6 +1518,12 @@ pub const List = extern struct {
             return @ptrCast(r);
         }
         return error.PyError;
+    }
+
+    // Create a new copy of this list
+    // Returns new reference
+    pub inline fn copy(self: *List) !*List {
+        return self.getSlice(0, self.sizeUnchecked());
     }
 
     // Same as length but no error checking
