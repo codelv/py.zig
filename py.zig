@@ -144,6 +144,16 @@ pub inline fn attributeErrorObject(comptime value: anytype, msg: [:0]const u8, a
     return value;
 }
 
+// Helper that is the equivalent to `KeyError(msg)`
+pub inline fn keyError(msg: [:0]const u8, args: anytype) !void {
+    return errorFormat(@ptrCast(c.PyExc_KeyError), msg, args);
+}
+
+pub inline fn keyErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+    keyError(msg, args) catch {};
+    return value;
+}
+
 pub inline fn memoryError() !void {
     _ = c.PyErr_NoMemory();
     return error.PyError;
@@ -1030,19 +1040,20 @@ pub const Int = extern struct {
         return c.PyIndex_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
-    // Convert to the given zig type
+    // Convert to the given zig type. If it cannot be safely casted it
+    // will raise a ValueError("int out of range for T")
     pub inline fn as(self: *Int, comptime T: type) !T {
         comptime var error_value = -1;
         const n = @bitSizeOf(c_long);
-        const r: T = switch (@typeInfo(T)) {
+        const r: ?T = switch (@typeInfo(T)) {
             .Int => |info| switch (info.bits) {
-                0...n => @intCast(if (info.signedness == .signed)
+                0...n => std.math.cast(T, if (info.signedness == .signed)
                     c.PyLong_AsLong(@ptrCast(self))
                 else blk: {
                     error_value = std.math.maxInt(c_ulong); // Update error value
                     break :blk c.PyLong_AsUnsignedLong(@ptrCast(self));
                 }),
-                else => @intCast(if (info.signedness == .signed)
+                else => std.math.cast(T, if (info.signedness == .signed)
                     c.PyLong_AsLongLong(@ptrCast(self))
                 else blk: {
                     error_value = std.math.maxInt(c_ulonglong); // Update error value
@@ -1052,11 +1063,14 @@ pub const Int = extern struct {
             .Float => @floatCast(c.PyLong_AsDouble(@ptrCast(self))),
             else => @compileError("Cannot convert python in to " ++ @typeName(T)),
         };
-
-        if (r == error_value and errorOccurred() != null) {
-            return error.PyError;
+        if (r) |value| {
+            if (value == error_value and errorOccurred() != null) {
+                return error.PyError;
+            }
+            return value;
         }
-        return r;
+        try valueError("int out of range for {s}", .{@typeName(T)});
+        unreachable;
     }
 
     // Create a pyton Int from any zig integer or float type. This will
