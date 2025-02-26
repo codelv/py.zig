@@ -1852,6 +1852,25 @@ pub const Dict = extern struct {
         return @ptrCast(c.PyDict_GetItemString(@ptrCast(self), @ptrCast(key)));
     }
 
+    // Return a borrowed reference to the object from dictionary p which has a key key.
+    // If an error occurred return the error.
+    // If the key is missing a error return a KeyError
+    // This is equivalent to the `o[key]` in python.
+    pub inline fn getOrError(self: *Dict, key: *Object) !*Object {
+        if (c.PyDict_GetItemWithError(@ptrCast(self), @ptrCast(key))) |v| {
+            return @ptrCast(v);
+        }
+        if (errorOccurred() == null) {
+            if (Str.check(key)) {
+                const k: *Str = @ptrCast(key);
+                try keyError("'{s}'", .{k.data()});
+            } else {
+                try keyError("'{s}'", .{key.typeName()});
+            }
+        }
+        return error.PyError;
+    }
+
     // Insert val into the dictionary p with a key of key. key must be hashable;
     // if it isn’t, TypeError will be raised.
     // This function does not steal a reference to val.
