@@ -454,6 +454,11 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return c.PyObject_Size(@ptrCast(self));
         }
 
+        // Set ob_size size
+        pub inline fn setObjectSize(self: *T, size: isize) void {
+            c.Py_SET_SIZE(@ptrCast(self), size);
+        }
+
         // Compute and return the hash value of an object o.
         // This is the equivalent of the Python expression hash(o).
         pub inline fn hash(self: *T) !isize {
@@ -1550,7 +1555,7 @@ pub const List = extern struct {
         return c.PyList_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
-    // Return a new empty dictionary, or NULL on failure.
+    // Return a new empty list, or NULL on failure.
     // Returns a new reference
     pub inline fn new(len: usize) !*List {
         if (c.PyList_New(@intCast(len))) |r| {
@@ -1578,6 +1583,11 @@ pub const List = extern struct {
         return c.PyList_Size(@ptrCast(self));
     }
 
+    pub inline fn sizeUnsafe(self: *List) isize {
+        std.debug.assert(List.check(@ptrCast(self)));
+        return self.impl.ob_size;
+    }
+
     // Get a borrowed reference to the list item.
     // The position must be non-negative; indexing from the end of the list
     // is not supported.  If index is out of bounds (<0 or >=len(list)),
@@ -1596,7 +1606,7 @@ pub const List = extern struct {
 
     // Get borrowed refernce to list item at index without type or bounds checking
     // Calls PyList_GET_ITEM(self, index).
-    pub inline fn getUnsafe(self: *List, index: usize) ?*Object {
+    pub inline fn getUnsafe(self: *const List, index: usize) ?*Object {
         std.debug.assert(List.check(@ptrCast(self)));
         return @ptrCast(self.impl.ob_item[index]);
     }
@@ -1622,7 +1632,7 @@ pub const List = extern struct {
     // content. This macro “steals” a reference to item, and, unlike PyList_SetItem(),
     // does not discard a reference to any item that is being replaced;
     // any reference in list at position i will be leaked.
-    pub inline fn setUnsafe(self: *List, index: isize, item: *Object) void {
+    pub inline fn setUnsafe(self: *List, index: usize, item: *Object) void {
         std.debug.assert(List.check(@ptrCast(self)));
         self.impl.ob_item[index] = @ptrCast(item);
     }
@@ -1737,6 +1747,21 @@ pub const List = extern struct {
     // Same as reverse but no error checking. Return 0 on success, -1 on failure.
     pub inline fn reverseUnchecked(self: *List) c_int {
         return c.PyList_Reverse(@ptrCast(self));
+    }
+
+    // Iterate over list items inplace.
+    // Assumes the item has been checked that is is indeed a List
+    // This is likely slower than using for(0..n) |item|
+    // Returns a borrowed reference to the item
+    pub inline fn next(self: *List, pos: *usize) ?*Object {
+        // Zig will safety check this for -1 in release safe
+        const n: usize = @intCast(self.sizeUnsafe());
+        const i = pos.*;
+        if (i < n) {
+            pos.* = i + 1;
+            return self.getUnsafe(i).?;
+        }
+        return null;
     }
 
     // Return a new tuple object containing the contents of list; equivalent to tuple(list).
