@@ -93,12 +93,7 @@ pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) Error
         c.PyErr_SetString(@ptrCast(exc), @ptrCast(format));
         return error.PyError;
     }
-    const data = std.fmt.allocPrint(allocator, format, args) catch {
-        return memoryError(); // TODO: This squashes the error
-    };
-    defer allocator.free(data);
-    // TODO: is there a way to avoid a copy?
-    const msg = try Str.fromSlice(data); // TODO: This squashes the error
+    const msg = try Str.format(format, args); // TODO: This squashes the error
     defer msg.decref();
     c.PyErr_SetObject(@ptrCast(exc), @ptrCast(msg));
     return error.PyError;
@@ -900,7 +895,7 @@ pub const Iter = struct {
     // Import the iterarator
     pub usingnamespace IteratorProtocol(@This());
 
-    pub fn check(obj: *const Object) bool {
+    pub inline fn check(obj: *const Object) bool {
         return c.PyIter_Check(@constCast(@ptrCast(obj))) != 0;
     }
 };
@@ -1256,6 +1251,20 @@ pub const Str = extern struct {
         return error.PyError;
     }
 
+    // Format a string using zig alloc print.
+    pub inline fn format(comptime msg: []const u8, args: anytype) Error!*Str {
+        return formatAlloc(allocator, msg, args);
+    }
+
+    pub inline fn formatAlloc(alloc: std.mem.Allocator, comptime msg: []const u8, args: anytype) Error!*Str {
+        const str = std.fmt.allocPrint(alloc, msg, args) catch {
+            try memoryError(); // TODO: This squashes the error
+        };
+        defer allocator.free(str);
+        // TODO: is there a way to avoid a copy?
+        return try Str.fromSlice(str);
+    }
+
     // A combination of PyUnicode_FromString() and PyUnicode_InternInPlace(),
     // meant for statically allocated strings.
     // Return a new (“owned”) reference to either a new Unicode string object
@@ -1273,12 +1282,12 @@ pub const Str = extern struct {
     }
 
     // Return data as utf8
-    pub inline fn asString(self: *Str) [:0]const u8 {
+    pub inline fn data(self: *Str) [:0]const u8 {
         return std.mem.span(c.PyUnicode_AsUTF8(@ptrCast(self)));
     }
 
-    // Alias to asString
-    pub const data = asString;
+    // Alias to data
+    pub const asString = data;
 };
 
 pub const Bytes = extern struct {
@@ -1357,7 +1366,7 @@ pub const Tuple = extern struct {
             // Eg var arg: *Str: undefined
             // then &arg is **Str
             const ArgType = @typeInfo(@typeInfo(T).Pointer.child).Pointer.child;
-            const obj = try self.get(i);
+            const obj = self.getUnsafe(i).?;
             if (!ArgType.check(obj)) {
                 return typeError("Argument at {} must be {}", .{ i, ArgType });
             }
@@ -1477,9 +1486,10 @@ pub const Tuple = extern struct {
         return @intCast(r);
     }
 
-    pub inline fn sizeUnchecked(self: *Tuple) isize {
+    pub inline fn sizeUnsafe(self: *Tuple) isize {
         return c.PyTuple_GET_SIZE(@ptrCast(self));
     }
+    pub const sizeUnchecked = sizeUnsafe;
 
     // Return the object at position pos in the tuple pointed to by p.
     // If pos is negative or out of bounds,
@@ -1496,7 +1506,7 @@ pub const Tuple = extern struct {
     pub inline fn getUnsafe(self: *Tuple, pos: usize) ?*Object {
         std.debug.assert(Tuple.check(@ptrCast(self)));
         // Weird casting is because zig (correctly) thinks it goes OOB
-        // becaues it's defined as a single item array
+        // because it's defined as a single item array
         const items: [*]*Object = @ptrCast(&self.impl.ob_item);
         return items[pos];
     }
@@ -1544,6 +1554,21 @@ pub const Tuple = extern struct {
     pub inline fn copy(self: *Tuple) !*Tuple {
         const end = try self.size();
         return try self.slice(0, end);
+    }
+
+    // Iterate over tuple items inplace.
+    // Assumes the self has been checked that is is indeed a tuple
+    // This is likely slower than using for(0..n) |item|
+    // Returns a borrowed reference to the item
+    pub inline fn next(self: *Tuple, pos: *usize) ?*Object {
+        // Zig will safety check this for -1 in release safe
+        const n: usize = @intCast(self.sizeUnsafe());
+        const i = pos.*;
+        if (i < n) {
+            pos.* = i + 1;
+            return self.getUnsafe(i).?;
+        }
+        return null;
     }
 };
 
@@ -1599,7 +1624,7 @@ pub const List = extern struct {
 
     pub inline fn sizeUnsafe(self: *List) isize {
         std.debug.assert(List.check(@ptrCast(self)));
-        return self.impl.ob_size;
+        return c.PyList_GET_SIZE(@ptrCast(self));
     }
 
     // Get a borrowed reference to the list item.
@@ -2200,7 +2225,7 @@ pub const Code = extern struct {
     pub usingnamespace ObjectProtocol(@This());
 
     // Return true if co is a code object. This function always succeeds.
-    pub fn check(obj: *const Object) bool {
+    pub inline fn check(obj: *const Object) bool {
         return c.PyCode_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 };
@@ -2213,7 +2238,7 @@ pub const Function = extern struct {
 
     // Return true if o is a function object (has type PyFunction_Type).
     // The parameter must not be NULL. This function always succeeds.
-    pub fn check(obj: *const Object) bool {
+    pub inline fn check(obj: *const Object) bool {
         return c.PyFunction_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
@@ -2319,7 +2344,7 @@ pub const Method = extern struct {
 
     // Return true if o is a method object (has type PyMethod_Type).
     // The parameter must not be NULL. This function always succeeds.
-    pub fn check(obj: *const Object) bool {
+    pub inline fn check(obj: *const Object) bool {
         return c.PyMethod_Check(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
