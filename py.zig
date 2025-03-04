@@ -168,7 +168,7 @@ pub inline fn clear(obj: anytype) void {
     } else if (comptime canCastToObjectPtr(T)) {
         setref(@ptrCast(obj), undefined);
     } else {
-        @compileError(std.fmt.comptimePrint("py.clear argument must be castable to **Object or *?*Object, got: {s}", .{T}));
+        @compileError(std.fmt.comptimePrint("py.clear argument must be castable to **Object or *?*Object, got: {s}", .{@typeName(T)}));
     }
 }
 
@@ -297,6 +297,58 @@ pub inline fn parseTupleAndKeywords(args: *Tuple, kwargs: ?*Dict, format: [:0]co
     } ++ results) == 0) {
         return error.PyError;
     }
+}
+
+// Create a python enum.IntFlag for the given enum
+// Returns new reference
+pub fn newIntEnum(comptime T: type) !*Object {
+    const fields = @typeInfo(T).Enum.fields;
+    const enum_mod = try importModule("enum");
+    defer enum_mod.decref();
+
+    const cls = try enum_mod.getAttrString("IntEnum");
+    defer cls.decref();
+    if (!Type.check(cls)) {
+        try typeError("enum.IntEnum is not a valid type", .{});
+    }
+    const items = try Tuple.new(fields.len);
+    defer items.decref();
+    inline for (fields, 0..) |f, i| {
+        const entry = try Tuple.packStolen(.{
+            try Str.fromSlice(f.name),
+            try Int.new(f.value),
+        });
+        items.setUnsafe(i, @ptrCast(entry)); // steals
+    }
+    const name = try Str.fromSlice(@typeName(T));
+    defer name.decref();
+    return cls.callArgs(.{ name, items });
+}
+
+// Create a python enum.IntFlag for the given enum
+// Returns new reference
+pub fn newIntFlag(comptime T: type) !*Object {
+    const fields = @typeInfo(T).Enum.fields;
+    const enum_mod = try importModule("enum");
+    defer enum_mod.decref();
+
+    const cls = try enum_mod.getAttrString("IntFlag");
+    defer cls.decref();
+    if (!Type.check(cls)) {
+        try typeError("enum.IntFlag is not a valid type", .{});
+    }
+    const items = try Tuple.new(fields.len);
+    defer items.decref();
+    inline for (fields, 0..) |f, i| {
+        const entry = try Tuple.packStolen(.{
+            try Str.fromSlice(f.name),
+            try Int.new(f.value),
+        });
+        items.setUnsafe(i, @ptrCast(entry)); // steals
+    }
+    const name = try Str.fromSlice(@typeName(T));
+    defer name.decref();
+    return cls.callArgs(.{ name, items });
 }
 
 // Check that the given type can be safely casted to a *Object
@@ -910,13 +962,21 @@ pub const Type = extern struct {
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
 
-    // Create a new type.
+    // Create a new type using a metaclass.
     // This is equivalent to the Python expression:  type.__new__(self, name, bases, dict)
     // Returns new reference
     pub inline fn new(meta: *Type, name: *Str, bases: *Tuple, dict: *Dict) !*Object {
         const builtin_type: *Object = @ptrCast(&c.PyType_Type);
         const new_str = try Str.internFromString("__new__");
         return try builtin_type.callMethod(new_str, .{ meta, name, bases, dict });
+    }
+
+    // Create a new type by calling the builtin type function
+    // This is equivalent to the Python expression:  type(name, bases, dict)
+    // Returns new reference
+    pub inline fn create(name: *Str, bases: *Tuple, dict: *Dict) !*Object {
+        const builtin_type: *Object = @ptrCast(&c.PyType_Type);
+        return try builtin_type.callArgs(.{ name, bases, dict });
     }
 
     // Generic handler for the tp_new slot of a type object.
@@ -1408,7 +1468,7 @@ pub const Tuple = extern struct {
             if (!comptime canCastToObject(ArgType)) {
                 @compileError("Cannot pack tuple with non *Object type: " ++ @typeName(ArgType));
             }
-            tuple.setUnsafe(i, arg);
+            tuple.setUnsafe(i, @ptrCast(arg));
         }
         return tuple;
     }
