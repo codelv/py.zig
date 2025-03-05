@@ -418,18 +418,22 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         }
 
         pub inline fn hasAttrString(self: *Object, attr: [:0]const u8) bool {
-            return c.PyObject_HasAttr(@ptrCast(self), @ptrCast(attr)) == 0;
+            return c.PyObject_HasAttrString(@ptrCast(self), @ptrCast(attr)) == 0;
         }
 
         pub inline fn hasAttrWithError(self: *Object, attr: *Str) !bool {
             const r = c.PyObject_HasAttrWithError(@ptrCast(self), @ptrCast(attr));
-            if (r < 0) return error.PyError;
+            if (r < 0) {
+                return error.PyError;
+            }
             return r == 1;
         }
 
         pub inline fn hasAttrStringWithError(self: *Object, attr: [:0]const u8) !bool {
-            const r = c.PyObject_HasAttrWithError(@ptrCast(self), @ptrCast(attr));
-            if (r < 0) return error.PyError;
+            const r = c.PyObject_HasAttrStringWithError(@ptrCast(self), @ptrCast(attr));
+            if (r < 0) {
+                return error.PyError;
+            }
             return r == 1;
         }
 
@@ -637,7 +641,8 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return r != 0;
         }
 
-        // Calls PyObject_IsTrue on self. Same as isTrue but without error checking
+        // Calls PyObject_IsTrue on self.
+        // Same as evalsTrue but without error checking.
         // On failure, return -1.
         pub inline fn evalsTrueUnchecked(self: *T) c_int {
             return c.PyObject_IsTrue(@ptrCast(self));
@@ -653,7 +658,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return r != 0;
         }
 
-        // Calls PyObject_Not on self. Same as isNot but without error checking
+        // Calls PyObject_Not on self. Same as evalsFalse but without error checking
         // On failure, return -1.
         pub inline fn evalsFalseUnchecked(self: *T) c_int {
             return c.PyObject_Not(@ptrCast(self));
@@ -784,7 +789,8 @@ pub inline fn CallProtocol(comptime T: type) type {
                     inline for (args, 0..) |arg, i| {
                         objs[i] = @ptrCast(arg);
                     }
-                    break :blk c.PyObject_Vectorcall(@ptrCast(self), @ptrCast(&objs), objs.len, null);
+                    const nargsf = objs.len | c.PY_VECTORCALL_ARGUMENTS_OFFSET;
+                    break :blk c.PyObject_Vectorcall(@ptrCast(self), @ptrCast(&objs), nargsf, null);
                 },
             });
         }
@@ -827,7 +833,8 @@ pub inline fn CallProtocol(comptime T: type) type {
                     inline for (args, 1..) |arg, i| {
                         objs[i] = @ptrCast(arg);
                     }
-                    break :blk c.PyObject_VectorcallMethod(@ptrCast(name), @ptrCast(&objs), objs.len, null);
+                    const nargsf = objs.len | c.PY_VECTORCALL_ARGUMENTS_OFFSET;
+                    break :blk c.PyObject_VectorcallMethod(@ptrCast(name), @ptrCast(&objs), nargsf, null);
                 },
             });
         }
