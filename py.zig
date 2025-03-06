@@ -697,7 +697,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
 
         // Compare the values of o1 and o2 using the operation specified by opid, like PyObject_RichCompare(),
         // but returns -1 on error, 0 if the result is false, 1 otherwise.
-        pub inline fn compare(self: *const T, other: *const Object, comptime op: CompareOp) !bool {
+        pub inline fn compare(self: *const T, comptime op: CompareOp, other: *const Object) !bool {
             const flag = switch (op) {
                 .lt => c.Py_LT,
                 .lte => c.Py_LE,
@@ -706,7 +706,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                 .gt => c.Py_GT,
                 .gte => c.Py_GE,
             };
-            const r = self.compareUnchecked(other, flag);
+            const r = self.compareUnchecked(flag, other);
             if (r < 0) {
                 return error.PyError;
             }
@@ -714,8 +714,8 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         }
 
         // Same as compare with no error or op checking
-        pub inline fn compareUnchecked(self: *const T, other: *const Object, op: c_int) c_int {
-            return @ptrCast(c.PyObject_RichCompareBool(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op));
+        pub inline fn compareUnchecked(self: *const T, op: c_int, other: *const Object) c_int {
+            return c.PyObject_RichCompareBool(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op);
         }
 
         // Compare the values of o1 and o2 using the operation specified by opid, which must be one of Py_LT, Py_LE, Py_EQ, Py_NE, Py_GT, or Py_GE,
@@ -723,7 +723,8 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         // This is the equivalent of the Python expression o1 op o2,
         // where op is the operator corresponding to opid.
         // Returns the value of the comparison on success, or NULL on failure.
-        pub inline fn compareObject(self: *const T, other: *const Object, comptime op: CompareOp) !*Object {
+        // Returns new reference
+        pub inline fn compareObject(self: *const T, comptime op: CompareOp, other: *const Object) !*Object {
             const flag = switch (op) {
                 .lt => c.Py_LT,
                 .lte => c.Py_LE,
@@ -732,14 +733,14 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                 .gt => c.Py_GT,
                 .gte => c.Py_GE,
             };
-            if (self.compareObjectUnchecked(self, other, flag)) |r| {
+            if (self.compareObjectUnchecked(flag, other)) |r| {
                 return r;
             }
             return error.PyError;
         }
 
         // Same as compareObject with no error or op checking
-        pub inline fn compareObjectUnchecked(self: *const T, other: *const Object, op: c_int) ?*Object {
+        pub inline fn compareObjectUnchecked(self: *const T, op: c_int, other: *const Object) ?*Object {
             return @ptrCast(c.PyObject_RichCompare(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op));
         }
 
@@ -1284,15 +1285,20 @@ pub const Float = extern struct {
     pub const fromDouble = new;
     pub const fromDoubleUnchecked = newUnchecked;
 
+    pub inline fn fromInt(int: *Int) !*Float {
+        const v = try int.as(f64);
+        return try Float.new(v);
+    }
+
     // Create a PyFloatObject object based on the string value in str, or NULL on failure.
-    pub inline fn fromString(value: [:0]const u8) !*Float {
+    pub inline fn fromString(value: *Str) !*Float {
         if (fromStringUnchecked(value)) |r| {
             return @ptrCast(r);
         }
         return error.PyError;
     }
 
-    pub inline fn fromStringUnchecked(value: [:0]const u8) ?*Float {
+    pub inline fn fromStringUnchecked(value: *Str) ?*Float {
         return @ptrCast(c.PyFloat_FromString(@ptrCast(value)));
     }
 };
