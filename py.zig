@@ -7,10 +7,10 @@ const std = @import("std");
 const VER_312 = 0x030C0000;
 const VER_313 = 0x030D0000;
 
-pub const VersionOp = enum { gt, gte, lt, lte, eq, ne };
+pub const CompareOp = enum { gt, gte, lt, lte, eq, ne };
 
 // Return true if the compile version is over the given value
-pub inline fn versionCheck(comptime op: VersionOp, comptime version: c_int) bool {
+pub inline fn versionCheck(comptime op: CompareOp, comptime version: c_int) bool {
     const py_ver = c.PY_VERSION_HEX;
     return switch (op) {
         .gt => py_ver > version,
@@ -302,6 +302,7 @@ pub inline fn parseTupleAndKeywords(args: *Tuple, kwargs: ?*Dict, format: [:0]co
 // Create a python enum.IntFlag for the given enum
 // Returns new reference
 pub fn newIntEnum(comptime T: type) !*Object {
+    @setEvalBranchQuota(10000);
     const fields = @typeInfo(T).Enum.fields;
     const enum_mod = try importModule("enum");
     defer enum_mod.decref();
@@ -328,6 +329,7 @@ pub fn newIntEnum(comptime T: type) !*Object {
 // Create a python enum.IntFlag for the given enum
 // Returns new reference
 pub fn newIntFlag(comptime T: type) !*Object {
+    @setEvalBranchQuota(10000);
     const fields = @typeInfo(T).Enum.fields;
     const enum_mod = try importModule("enum");
     defer enum_mod.decref();
@@ -691,6 +693,54 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         // return NULL without setting an exception.
         pub inline fn getDictPtr(self: *T) ?**Dict {
             return @ptrCast(c._PyObject_GetDictPtr(@ptrCast(self)));
+        }
+
+        // Compare the values of o1 and o2 using the operation specified by opid, like PyObject_RichCompare(),
+        // but returns -1 on error, 0 if the result is false, 1 otherwise.
+        pub inline fn compare(self: *const T, other: *const Object, comptime op: CompareOp) !bool {
+            const flag = switch (op) {
+                .lt => c.Py_LT,
+                .lte => c.Py_LE,
+                .eq => c.Py_EQ,
+                .ne => c.Py_NE,
+                .gt => c.Py_GT,
+                .gte => c.Py_GE,
+            };
+            const r = self.compareUnchecked(other, flag);
+            if (r < 0) {
+                return error.PyError;
+            }
+            return r == 1;
+        }
+
+        // Same as compare with no error or op checking
+        pub inline fn compareUnchecked(self: *const T, other: *const Object, op: c_int) c_int {
+            return @ptrCast(c.PyObject_RichCompareBool(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op));
+        }
+
+        // Compare the values of o1 and o2 using the operation specified by opid, which must be one of Py_LT, Py_LE, Py_EQ, Py_NE, Py_GT, or Py_GE,
+        // corresponding to <, <=, ==, !=, >, or >= respectively.
+        // This is the equivalent of the Python expression o1 op o2,
+        // where op is the operator corresponding to opid.
+        // Returns the value of the comparison on success, or NULL on failure.
+        pub inline fn compareObject(self: *const T, other: *const Object, comptime op: CompareOp) !*Object {
+            const flag = switch (op) {
+                .lt => c.Py_LT,
+                .lte => c.Py_LE,
+                .eq => c.Py_EQ,
+                .ne => c.Py_NE,
+                .gt => c.Py_GT,
+                .gte => c.Py_GE,
+            };
+            if (self.compareObjectUnchecked(self, other, flag)) |r| {
+                return r;
+            }
+            return error.PyError;
+        }
+
+        // Same as compareObject with no error or op checking
+        pub inline fn compareObjectUnchecked(self: *const T, other: *const Object, op: c_int) ?*Object {
+            return @ptrCast(c.PyObject_RichCompare(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op));
         }
 
         // Add the mapping protocol
