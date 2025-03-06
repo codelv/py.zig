@@ -550,11 +550,10 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         // Compute a string representation of object o. Null and type check the result is a Str.
         pub inline fn str(self: *T) !*Str {
             if (self.strUnchecked()) |s| {
-                if (Str.check(s)) {
-                    return @ptrCast(s);
+                if (!Str.check(s)) {
+                    try typeError("str did not return a str", .{});
                 }
-                // Set an error message
-                try typeError("str did not return a str", .{});
+                return @ptrCast(s);
             }
             return error.PyError;
         }
@@ -799,7 +798,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         // If no arguments are needed, then args can be NULL.
         // This is the equivalent of the Python expression: callable(*args).
         // Returns new reference
-        pub inline fn callObject(self: *T, args: ?*Object) !*Object {
+        pub inline fn callObject(self: *T, args: ?*Tuple) !*Object {
             if (self.callObjectUnchecked(args)) |r| {
                 return r;
             }
@@ -807,7 +806,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         }
 
         // Calls PyObject_CallObject. Return the result of the call on success, or raise an exception and return NULL on failure.
-        pub inline fn callObjectUnchecked(self: *T, args: ?*Object) ?*Object {
+        pub inline fn callObjectUnchecked(self: *T, args: ?*Tuple) ?*Object {
             return @ptrCast(c.PyObject_CallObject(@ptrCast(self), @ptrCast(args)));
         }
 
@@ -1350,11 +1349,9 @@ pub const Str = extern struct {
 
     // Return data as utf8
     pub inline fn data(self: *Str) [:0]const u8 {
+        std.debug.assert(Str.check(@ptrCast(self)));
         return std.mem.span(c.PyUnicode_AsUTF8(@ptrCast(self)));
     }
-
-    // Alias to data
-    pub const asString = data;
 };
 
 pub const Bytes = extern struct {
@@ -1374,7 +1371,19 @@ pub const Bytes = extern struct {
         return c.PyBytes_CheckExact(@as([*c]c.PyObject, @constCast(@ptrCast(obj)))) != 0;
     }
 
-    // TODO: finish
+    // Return a new bytes object with a copy of the string v as value on success, and error on failure.
+    pub inline fn fromSlice(v: []const u8) !*Bytes {
+        if (c.PyBytes_FromStringAndSize(v.ptr, @intCast(v.len))) |o| {
+            return @ptrCast(o);
+        }
+        return error.PyError;
+    }
+
+    // Return data as bytes
+    pub inline fn data(self: *Bytes) [:0]const u8 {
+        std.debug.assert(Bytes.check(@ptrCast(self)));
+        return std.mem.span(c.PyBytes_AsString(@ptrCast(self)));
+    }
 };
 
 pub const Slice = extern struct {
