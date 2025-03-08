@@ -34,6 +34,18 @@ pub inline fn finalize() !void {
 // The callee must set the python error or python will raise a SystemError.
 pub const Error = error{PyError};
 
+// Print a message to stdout. All *Objects will be formated using "str".
+pub fn print(comptime format: []const u8, args: anytype) Error!void {
+    // TODO: Use a lock?
+    const stdout = std.io.getStdOut().writer();
+    stdout.print(format, args) catch {
+        if (errorOccurred() != null) {
+            return error.PyError;
+        }
+        try systemError("print error", .{});
+    };
+}
+
 // Test whether the error indicator is set. If set, return the exception type (the first
 // argument to the last call to one of the PyErr_Set* functions or to PyErr_Restore()).
 // If not set, return NULL. You do not own a reference to the return value, so you do not
@@ -93,7 +105,7 @@ pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) Error
         c.PyErr_SetString(@ptrCast(exc), @ptrCast(format));
         return error.PyError;
     }
-    const msg = try Str.format(format, args); // TODO: This squashes the error
+    const msg = try Str.new(format, args); // TODO: This squashes the error
     defer msg.decref();
     c.PyErr_SetObject(@ptrCast(exc), @ptrCast(msg));
     return error.PyError;
@@ -757,6 +769,24 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return @ptrCast(c.PyObject_RichCompare(@constCast(@ptrCast(self)), @constCast(@ptrCast(other)), op));
         }
 
+        // Format
+        pub fn format(
+            self: *const T,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+            if (comptime T == Str) {
+                try writer.print("{s}", .{self.data()});
+            } else {
+                const s = try str(@constCast(self));
+                defer s.decref();
+                try writer.print("{s}", .{s.data()});
+            }
+        }
+
         // Add the mapping protocol
         pub usingnamespace MappingProtocol(T);
 
@@ -1386,18 +1416,22 @@ pub const Str = extern struct {
         return error.PyError;
     }
 
-    // Format a string using zig alloc print.
-    pub inline fn format(comptime msg: []const u8, args: anytype) Error!*Str {
-        return formatAlloc(allocator, msg, args);
+    // Create a new string using zig alloc print. If no format args are provided
+    // This is equivalent to Str.fromSlice
+    pub inline fn new(comptime msg: []const u8, args: anytype) Error!*Str {
+        return newAlloc(allocator, msg, args);
     }
 
-    pub inline fn formatAlloc(alloc: std.mem.Allocator, comptime msg: []const u8, args: anytype) Error!*Str {
+    pub inline fn newAlloc(alloc: std.mem.Allocator, comptime msg: []const u8, args: anytype) Error!*Str {
+        if (comptime args.len == 0) {
+            return fromSlice(msg);
+        }
         const str = std.fmt.allocPrint(alloc, msg, args) catch {
             try memoryError(); // TODO: This squashes the error
         };
         defer allocator.free(str);
         // TODO: is there a way to avoid a copy?
-        return try Str.fromSlice(str);
+        return try fromSlice(str);
     }
 
     // A combination of PyUnicode_FromString() and PyUnicode_InternInPlace(),
@@ -1417,9 +1451,9 @@ pub const Str = extern struct {
     }
 
     // Return data as utf8
-    pub inline fn data(self: *Str) [:0]const u8 {
+    pub inline fn data(self: *const Str) [:0]const u8 {
         std.debug.assert(Str.check(@ptrCast(self)));
-        return std.mem.span(c.PyUnicode_AsUTF8(@ptrCast(self)));
+        return std.mem.span(c.PyUnicode_AsUTF8(@constCast(@ptrCast(self))));
     }
 };
 
