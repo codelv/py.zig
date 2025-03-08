@@ -313,7 +313,9 @@ pub inline fn xsetref(dst: *?*Object, src: ?*Object) void {
     dst.* = src;
 }
 
-pub inline fn parseTupleAndKeywords(args: *Tuple, kwargs: ?*Dict, format: [:0]const u8, keywords: [*c]const [*c]u8, results: anytype) !void {
+// Warning the format "p" cannot return a zig-bool it must be a c_int.
+// TODO: Rewrite this in zig
+pub inline fn parseTupleAndKeywords(args: *Tuple, kwargs: ?*Dict, comptime format: [:0]const u8, keywords: [*c]const [*c]u8, results: anytype) !void {
     if (@call(.auto, c.PyArg_ParseTupleAndKeywords, .{
         @as([*c]c.PyObject, @ptrCast(args)),
         @as([*c]c.PyObject, @ptrCast(kwargs)),
