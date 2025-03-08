@@ -231,6 +231,19 @@ pub inline fn returnNotImplemented() *Object {
     return NotImplemented().newref();
 }
 
+// If value is not null return a new reference
+// otherwise return a new reference to None
+pub inline fn returnOptional(value: anytype) *Object {
+    const T = @TypeOf(value);
+    if (comptime canCastToOptionalObject(T)) {
+        if (value) |o| {
+            return @ptrCast(o.newref());
+        }
+        return returnNone();
+    }
+    @compileError(std.fmt.comptimePrint("py.returnOptional must be called with ?*Object: got {s}", .{T}));
+}
+
 // Only returns true if the object not null and not None
 pub inline fn notNone(obj: anytype) bool {
     const T = @TypeOf(obj);
