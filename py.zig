@@ -302,7 +302,7 @@ pub inline fn visitAll(objects: anytype, func: visitproc, arg: ?*anyopaque) c_in
 
 // Safely release a strong reference to object dst and setting dst to src.
 pub inline fn setref(dst: **Object, src: *Object) void {
-    const tmp: *Object = dst.*;
+    const tmp = dst.*;
     defer tmp.decref();
     dst.* = src;
 }
@@ -2651,7 +2651,14 @@ const Allocator = struct {
         _ = self;
         _ = alignment;
         _ = ret_addr;
-        return c.PyMem_Realloc(mem.ptr, new_len) != null;
+        _ = new_len;
+        _ = mem;
+        // PyMem_Realloc returns a new pointer which zig doesn't seem to support
+        // if (c.PyMem_Realloc(mem.ptr, new_len)) |r| {
+        //     mem.ptr = @ptrCast(r);
+        //     return true;
+        // }
+        return false;
     }
 
     pub fn remap(self: *anyopaque, mem: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
