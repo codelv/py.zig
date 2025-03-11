@@ -100,7 +100,7 @@ pub inline fn errorSetObject(exc: *Object, value: *Object) void {
 // String formatting is done using zig's std.fmt.
 // Does not steal a reference to exc.
 // This uses the global python allocator to allocate the message
-pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) Error!void {
+pub inline fn errorFormat(exc: *Object, comptime format: []const u8, args: anytype) Error!void {
     if (comptime args.len == 0) {
         c.PyErr_SetString(@ptrCast(exc), @ptrCast(format));
         return error.PyError;
@@ -112,51 +112,51 @@ pub inline fn errorFormat(exc: *Object, format: []const u8, args: anytype) Error
 }
 
 // Helper that is the equivalent to `TypeError(msg)`
-pub inline fn typeError(msg: [:0]const u8, args: anytype) !void {
+pub inline fn typeError(comptime msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_TypeError), msg, args);
 }
 
-pub inline fn typeErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+pub inline fn typeErrorObject(comptime value: anytype, comptime msg: [:0]const u8, args: anytype) @TypeOf(value) {
     typeError(msg, args) catch {};
     return value;
 }
 
 // Helper that is the equivalent to `SystemError(msg)`
-pub inline fn systemError(msg: [:0]const u8, args: anytype) !void {
+pub inline fn systemError(comptime msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_SystemError), msg, args);
 }
 
-pub inline fn systemErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+pub inline fn systemErrorObject(comptime value: anytype, comptime msg: [:0]const u8, args: anytype) @TypeOf(value) {
     systemError(msg, args) catch {};
     return value;
 }
 
 // Helper that is the equivalent to `ValueError(msg)`
-pub inline fn valueError(msg: [:0]const u8, args: anytype) !void {
+pub inline fn valueError(comptime msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_ValueError), msg, args);
 }
 
-pub inline fn valueErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+pub inline fn valueErrorObject(comptime value: anytype, comptime msg: [:0]const u8, args: anytype) @TypeOf(value) {
     valueError(msg, args) catch {};
     return value;
 }
 
 // Helper that is the equivalent to `AttributeError(msg)`
-pub inline fn attributeError(msg: [:0]const u8, args: anytype) !void {
+pub inline fn attributeError(comptime msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_AttributeError), msg, args);
 }
 
-pub inline fn attributeErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+pub inline fn attributeErrorObject(comptime value: anytype, comptime msg: [:0]const u8, args: anytype) @TypeOf(value) {
     attributeError(msg, args) catch {};
     return value;
 }
 
 // Helper that is the equivalent to `KeyError(msg)`
-pub inline fn keyError(msg: [:0]const u8, args: anytype) !void {
+pub inline fn keyError(comptime msg: [:0]const u8, args: anytype) !void {
     return errorFormat(@ptrCast(c.PyExc_KeyError), msg, args);
 }
 
-pub inline fn keyErrorObject(comptime value: anytype, msg: [:0]const u8, args: anytype) @TypeOf(value) {
+pub inline fn keyErrorObject(comptime value: anytype, comptime msg: [:0]const u8, args: anytype) @TypeOf(value) {
     keyError(msg, args) catch {};
     return value;
 }
@@ -410,6 +410,16 @@ pub inline fn canCastToOptionalObjectPtr(comptime T: type) bool {
         .Pointer => |info| canCastToOptionalObject(info.child),
         else => false,
     };
+}
+
+// Check at comptime that a zig tuple of arguments can all be casted to *Object
+pub inline fn checkArgsAreObjects(comptime label: []const u8, args: anytype) void {
+    inline for (args, 0..) |arg, i| {
+        const ArgType = @TypeOf(arg);
+        if (comptime !canCastToObject(ArgType)) {
+            @compileError(std.fmt.comptimePrint("{s} args must be castable to *Object, got {} for argument {}", .{ label, ArgType, i }));
+        }
+    }
 }
 
 // Object Protocol
@@ -772,7 +782,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         }
 
         // Format
-        pub fn format(
+        pub fn formatObject(
             self: *const T,
             comptime fmt: []const u8,
             options: std.fmt.FormatOptions,
@@ -788,6 +798,8 @@ pub inline fn ObjectProtocol(comptime T: type) type {
                 try writer.print("{s}", .{s.data()});
             }
         }
+        // Use custom format if defined
+        pub const format = if (@hasDecl(T, "format")) T.format else formatObject;
 
         // Add the mapping protocol
         pub usingnamespace MappingProtocol(T);
@@ -876,6 +888,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         // Calls PyObject_CallNoArgs. PyObject_CallOneArg, or
         // Return the result of the call on success, or raise an exception and return NULL on failure.
         pub inline fn callArgsUnchecked(self: *T, args: anytype) ?*Object {
+            checkArgsAreObjects("callArgs", args);
             return @ptrCast(switch (comptime args.len) {
                 0 => c.PyObject_CallNoArgs(@ptrCast(self)),
                 1 => c.PyObject_CallOneArg(@ptrCast(self), @ptrCast(args[0])),
@@ -919,6 +932,7 @@ pub inline fn CallProtocol(comptime T: type) type {
 
         // Same as callMethod with no error checking
         pub inline fn callMethodUnchecked(self: *T, name: *Str, args: anytype) ?*Object {
+            checkArgsAreObjects("callMethod", args);
             return @ptrCast(switch (comptime args.len) {
                 0 => c.PyObject_CallMethodNoArgs(@ptrCast(self), @ptrCast(name)),
                 1 => c.PyObject_CallMethodOneArg(@ptrCast(self), @ptrCast(name), @ptrCast(args[0])),
@@ -944,6 +958,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         }
 
         pub inline fn vectorCallUnchecked(self: *T, args: anytype, kwnames: ?*Object) ?*Object {
+            checkArgsAreObjects("vectorCall", args);
             return @ptrCast(c.PyObject_Vectorcall(@ptrCast(self), args, args.len, kwnames));
         }
 
@@ -955,6 +970,7 @@ pub inline fn CallProtocol(comptime T: type) type {
         }
 
         pub inline fn vectorCallMethodUnchecked(self: *T, name: *Str, args: anytype, kwnames: ?*Object) ?*Object {
+            checkArgsAreObjects("vectorCallMethod", args);
             return @ptrCast(c.PyObject_Vectorcall(@ptrCast(name), .{self} + args, args.len + 1, kwnames));
         }
     };
