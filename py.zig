@@ -752,6 +752,10 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             return @ptrCast(c._PyObject_GetDictPtr(@ptrCast(self)));
         }
 
+        pub inline fn getItemData(self: *T) ?*anyopaque {
+            return @ptrCast(c.PyObject_GetItemData(@ptrCast(self)));
+        }
+
         // Compare the values of o1 and o2 using the operation specified by opid, like PyObject_RichCompare(),
         // but returns -1 on error, 0 if the result is false, 1 otherwise.
         pub inline fn compare(self: *const T, comptime op: CompareOp, other: *const Object) !bool {
@@ -1187,6 +1191,15 @@ pub const Metaclass = extern struct {
     impl: c.PyHeapTypeObject,
     // Import the object protocol
     pub usingnamespace ObjectProtocol(@This());
+
+    pub inline fn getMemberDefs(self: *Metaclass) ![]c.PyMemberDef {
+        if (self.getItemData()) |ptr| {
+            const n: usize = @intCast(c.Py_SIZE(@ptrCast(self)));
+            const members: [*]c.PyMemberDef = @alignCast(@ptrCast(ptr));
+            return @ptrCast(members[0..n]);
+        }
+        return error.PyError;
+    }
 };
 
 pub const Bool = extern struct {
