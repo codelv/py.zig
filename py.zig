@@ -429,17 +429,25 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         pub const IS_PYOBJECT = true;
 
         pub inline fn incref(self: *T) void {
-            c.Py_IncRef(@ptrCast(self));
+            // Use the _ variant since it should be non-null
+            c._Py_IncRef(@ptrCast(self));
         }
 
         pub inline fn decref(self: *T) void {
-            c.Py_DecRef(@ptrCast(self));
+            // Use the _ variant since it should be non-null
+            c._Py_DecRef(@ptrCast(self));
         }
 
         // Create a new strong reference to an object: call Py_INCREF()
         // on o and return the object o.
         pub inline fn newref(self: *T) *T {
-            return @ptrCast(c.Py_NewRef(@ptrCast(self)));
+            self.incref();
+            return self;
+        }
+
+        // Get the object refcount
+        pub inline fn refcnt(self: *const T) isize {
+            return c.Py_REFCNT(@constCast(@ptrCast(self)));
         }
 
         // Returns a borrwed reference to the type
@@ -574,43 +582,55 @@ pub inline fn ObjectProtocol(comptime T: type) type {
         // already an iterator.  Raises TypeError and returns NULL if the object cannot be iterated.
         pub inline fn iter(self: *T) !*Iter {
             if (self.iterUnchecked()) |r| {
-                if (!Iter.check(r)) {
-                    try typeError("iter did not return an iterator", .{});
-                }
-                return @ptrCast(r);
+                return r;
             }
             return error.PyError;
         }
 
-        pub inline fn iterUnchecked(self: *T) ?*Object {
+        pub inline fn iterUnchecked(self: *T) ?*Iter {
+            // Python type checks the result is an Iter
             return @ptrCast(c.PyObject_GetIter(@ptrCast(self)));
         }
 
         // Compute a string representation of object o. Null and type check the result is a Str.
         pub inline fn str(self: *T) !*Str {
             if (self.strUnchecked()) |s| {
-                if (!Str.check(s)) {
-                    try typeError("str did not return a str", .{});
-                }
-                return @ptrCast(s);
+                return s;
             }
             return error.PyError;
         }
 
         // Calls PyObject_Str(self). Compute a string representation of object o.
         // Returns the string representation on success, NULL on failure.
-        pub inline fn strUnchecked(self: *T) ?*Object {
+        pub inline fn strUnchecked(self: *T) ?*Str {
+            // Python type checks the result is a Str
             return @ptrCast(c.PyObject_Str(@ptrCast(self)));
         }
 
         // Compute a bytes representation of object o. NULL is returned on failure and a bytes object on
         // success. This is equivalent to the Python expression bytes(o), when o is not an integer.
         // Unlike bytes(o), a TypeError is raised when o is an integer instead of a zero-initialized bytes object.
-        pub inline fn bytes(self: *T) ?*Object {
+        pub inline fn bytes(self: *T) ?*Bytes {
+            if (self.bytesUnchecked()) |s| {
+                return s;
+            }
+            return error.PyError;
+        }
+
+        pub inline fn bytesUnchecked(self: *T) ?*Bytes {
+            // Python type checks the result is Bytes
             return @ptrCast(c.PyObject_Bytes(@ptrCast(self)));
         }
 
-        pub inline fn repr(self: *T) ?*Object {
+        pub inline fn repr(self: *T) ?*Str {
+            if (self.reprUnchecked()) |s| {
+                return s;
+            }
+            return error.PyError;
+        }
+
+        pub inline fn reprUnchecked(self: *T) ?*Str {
+            // Python type checks the result is a Str
             return @ptrCast(c.PyObject_Repr(@ptrCast(self)));
         }
 
@@ -791,7 +811,7 @@ pub inline fn ObjectProtocol(comptime T: type) type {
             _ = fmt;
             _ = options;
             if (comptime T == Str) {
-                try writer.print("{s}", .{self.data()});
+                try writer.print("{s}", .{Str.data(@constCast(self))});
             } else {
                 const s = try str(@constCast(self));
                 defer s.decref();
@@ -1017,14 +1037,14 @@ pub fn IteratorProtocol(comptime T: type) type {
         // (it is up to the caller to check this). If there are no remaining values, it returns null
         // If an error occurs while retrieving the item, it throws error.PyError
         // Returns new reference
-        pub fn next(self: *T) !?*Object {
+        pub inline fn next(self: *T) !?*Object {
             if (self.nextUnchecked()) |r| {
-                return @ptrCast(r);
+                return r;
             }
             return checkErrorOccurred();
         }
 
-        pub fn nextUnchecked(self: *T) ?*Object {
+        pub inline fn nextUnchecked(self: *T) ?*Object {
             return @ptrCast(c.PyIter_Next(@ptrCast(self)));
         }
     };
@@ -1446,6 +1466,7 @@ pub const Str = extern struct {
         }
         const str = std.fmt.allocPrint(alloc, msg, args) catch {
             try memoryError(); // TODO: This squashes the error
+            unreachable;
         };
         defer allocator.free(str);
         // TODO: is there a way to avoid a copy?
@@ -1468,10 +1489,24 @@ pub const Str = extern struct {
         c.PyUnicode_InternInPlace(@ptrCast(str));
     }
 
-    // Return data as utf8
-    pub inline fn data(self: *const Str) [:0]const u8 {
+    // Return data as utf8. Ignores any errors decode error occurrs
+    pub inline fn data(self: *Str) [:0]const u8 {
         std.debug.assert(Str.check(@ptrCast(self)));
-        return std.mem.span(c.PyUnicode_AsUTF8(@constCast(@ptrCast(self))));
+        return self.dataOrError() catch {
+            errorClear();
+            return "";
+        };
+    }
+
+    // Return data as utf8.
+    // Raises error if a decode error occurs or self is not a str.
+    pub inline fn dataOrError(self: *Str) ![:0]const u8 {
+        var size: isize = 0;
+        if (c.PyUnicode_AsUTF8AndSize(@ptrCast(self), &size)) |ptr| {
+            // The returned buffer always has an extra null byte appended (not included in size),
+            return @ptrCast(ptr[0..@intCast(size)]);
+        }
+        return error.PyError;
     }
 };
 
@@ -1500,10 +1535,31 @@ pub const Bytes = extern struct {
         return error.PyError;
     }
 
+    pub inline fn size(self: *Bytes) !usize {
+        const r = self.sizeUnchecked();
+        if (r < 0) {
+            return error.PyError;
+        }
+        return @intCast(r);
+    }
+
+    pub inline fn sizeUnchecked(self: *Bytes) isize {
+        return c.PyBytes_Size(@ptrCast(self));
+    }
+
     // Return data as bytes
     pub inline fn data(self: *Bytes) [:0]const u8 {
         std.debug.assert(Bytes.check(@ptrCast(self)));
-        return std.mem.span(c.PyBytes_AsString(@ptrCast(self)));
+        return self.dataOrError() catch unreachable;
+    }
+
+    // Return data as bytes, raising an error if the type is invalid
+    pub inline fn dataOrError(self: *Bytes) ![:0]const u8 {
+        if (c.PyBytes_AsString(@ptrCast(self))) |ptr| {
+            const n: usize = @intCast(self.sizeUnchecked());
+            return @ptrCast(ptr[0..n]);
+        }
+        return error.PyError;
     }
 };
 
@@ -2316,7 +2372,7 @@ pub const Set = extern struct {
     }
 
     // Create a copy of this set
-    pub fn copy(self: *Set) !*Set {
+    pub inline fn copy(self: *Set) !*Set {
         return try new(@ptrCast(self));
     }
 
@@ -2339,7 +2395,7 @@ pub const Set = extern struct {
     // Unlike the Python __contains__() method, this function does not automatically convert unhashable sets into temporary frozensets.
     // Raise a TypeError if the key is unhashable.
     // Raise SystemError if anyset is not a set, frozenset, or an instance of a subtype.
-    pub fn contains(self: *Set, key: *Object) !bool {
+    pub inline fn contains(self: *Set, key: *Object) !bool {
         const r = self.containsUnchecked(key);
         if (r < 0) {
             return error.PyError;
@@ -2348,7 +2404,7 @@ pub const Set = extern struct {
     }
 
     // Same as contains with no error checking
-    pub fn containsUnchecked(self: *Set, key: *Object) c_int {
+    pub inline fn containsUnchecked(self: *Set, key: *Object) c_int {
         return c.PySet_Contains(@ptrCast(self), @ptrCast(key));
     }
 
@@ -2357,14 +2413,14 @@ pub const Set = extern struct {
     // Raise a TypeError if the key is unhashable.
     // Raise a MemoryError if there is no room to grow.
     // Raise a SystemError if set is not an instance of set or its subtype.
-    pub fn add(self: *Set, key: *Object) !void {
+    pub inline fn add(self: *Set, key: *Object) !void {
         if (self.addUnchecked(key) < 0) {
             return error.PyError;
         }
     }
 
     // Same as add with no error checking
-    pub fn addUnchecked(self: *Set, key: *Object) c_int {
+    pub inline fn addUnchecked(self: *Set, key: *Object) c_int {
         return c.PySet_Add(@ptrCast(self), @ptrCast(key));
     }
 
@@ -2373,7 +2429,7 @@ pub const Set = extern struct {
     // Raise a TypeError if the key is unhashable.
     // Unlike the Python discard() method, this function does not automatically convert unhashable sets into temporary frozensets.
     // Raise SystemError if set is not an instance of set or its subtype.
-    pub fn discard(self: *Set, key: *Object) !bool {
+    pub inline fn discard(self: *Set, key: *Object) !bool {
         const r = self.discardUnchecked(key);
         if (r < 0) {
             return error.PyError;
@@ -2382,14 +2438,14 @@ pub const Set = extern struct {
     }
 
     // Same as pop with no error checking
-    pub fn discardUnchecked(self: *Set, key: *Object) c_int {
+    pub inline fn discardUnchecked(self: *Set, key: *Object) c_int {
         return c.PySet_Discard(@ptrCast(self), @ptrCast(key));
     }
 
     // Return a new reference to an arbitrary object in the set, and removes the object from the set.
     // Raise KeyError if the set is empty. Raise a SystemError if set is not an instance of set or its subtype.
     // Returns new reference
-    pub fn pop(self: *Set) !*Object {
+    pub inline fn pop(self: *Set) !*Object {
         if (self.popUnchecked()) |r| {
             return r;
         }
@@ -2397,20 +2453,20 @@ pub const Set = extern struct {
     }
 
     // Same as pop with no error checking
-    pub fn popUnchecked(self: *Set) ?*Object {
+    pub inline fn popUnchecked(self: *Set) ?*Object {
         return @ptrCast(c.PySet_Pop(@ptrCast(self)));
     }
 
     // Empty an existing set of all elements.
     // raise SystemError if set is not an instance of set or its subtype.
-    pub fn clear(self: *Set) !void {
+    pub inline fn clear(self: *Set) !void {
         if (self.clearUnchecked() < 0) {
             return error.PyError;
         }
     }
 
     // Same as clear with no error checking
-    pub fn clearUnchecked(self: *Set) c_int {
+    pub inline fn clearUnchecked(self: *Set) c_int {
         return c.PySet_Clear(@ptrCast(self));
     }
 };
