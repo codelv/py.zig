@@ -2,6 +2,8 @@
 
 py.zig provides a _lightweight_ interface for creating python extensions in zig. 
 
+> Moved to https://codeberg.org/frmdstryr/py.zig
+
 It is intended to be used with [setuptools-zig](https://pypi.org/project/setuptools-zig/) by
 simply cloning or copying `py.zig` into your python project, adding an `Extension` entry 
 in your `setup.py`, and then using `const py = @import("py.zig");`  in your extensions 
